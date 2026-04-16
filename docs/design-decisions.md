@@ -87,3 +87,7 @@ When a voice cue triggers during playback, its narration text is added to the ch
 ### Unified speech module for both playback modes
 
 The `speech.ts` module handles both browser `speechSynthesis` and `HTMLAudioElement` (mp3) playback behind the same state interface. Pause/resume/cancel work identically regardless of which mode is active. This means per-bubble controls, cue playback, and chat TTS all share one state machine — no parallel tracking of audio elements vs speech utterances. The module exposes an `onChange` listener so Svelte reactive state stays in sync without polling.
+
+### System message folded into first user message for Sunset proxy
+
+The Sunset staging proxy silently drops `role: "system"` messages in streaming mode — returning `data: [DONE]` immediately with a 200 status and no error. This caused chat to appear broken (empty responses) despite the API key being valid. The fix: `chatStreamSunset` extracts system message content and prepends it to the first user message before sending. The Anthropic direct path is unaffected since it already handles system messages via the dedicated `system` field in the Anthropic Messages API. This is a known limitation of some OpenAI-compatible proxies and a common workaround.

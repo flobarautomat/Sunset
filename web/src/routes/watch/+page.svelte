@@ -60,6 +60,7 @@
 
 	// Play text via the configured TTS provider
 	async function playTTS(text: string, id?: string) {
+		if (!text.trim()) return;
 		if (ttsProvider === 'browser') {
 			speak(text, id);
 		} else {
@@ -232,7 +233,7 @@
 		promptText = '';
 		streaming = true;
 
-		const history = chatMessages.slice(0, -2);
+		const history = chatMessages.slice(0, -2).filter(m => m.content.trim() !== '');
 
 		await sendMessage(
 			sessionId,
@@ -251,6 +252,11 @@
 			},
 			(fullText) => {
 				streaming = false;
+				if (!fullText.trim()) {
+					// Remove empty assistant placeholder if API returned nothing
+					chatMessages = chatMessages.filter((m, i) => i !== chatMessages.length - 1 || m.content.trim() !== '');
+					return;
+				}
 				const msgId = `msg-${chatMessages.length - 1}`;
 				playTTS(fullText, msgId);
 			},

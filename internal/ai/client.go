@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -79,9 +80,24 @@ func (c *Client) chatStreamSunset(ctx context.Context, messages []Message) <-cha
 	go func() {
 		defer close(ch)
 
+		// Sunset proxy doesn't support role:"system" in streaming mode —
+		// fold system content into the first user message.
+		var systemPrefix string
+		var filtered []Message
+		for _, m := range messages {
+			if m.Role == "system" {
+				systemPrefix += m.Content + "\n\n"
+			} else {
+				filtered = append(filtered, m)
+			}
+		}
+		if systemPrefix != "" && len(filtered) > 0 && filtered[0].Role == "user" {
+			filtered[0] = Message{Role: "user", Content: systemPrefix + filtered[0].Content}
+		}
+
 		body, err := json.Marshal(openAIChatRequest{
 			Model:    c.model,
-			Messages: messages,
+			Messages: filtered,
 			Stream:   true,
 		})
 		if err != nil {
@@ -220,7 +236,8 @@ func (c *Client) readSSE(ch chan<- Chunk, req *http.Request, parseData func(stri
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		ch <- Chunk{Err: fmt.Errorf("upstream returned %d", resp.StatusCode)}
+		body, _ := io.ReadAll(resp.Body)
+		ch <- Chunk{Err: fmt.Errorf("upstream returned %d: %s", resp.StatusCode, string(body))}
 		return
 	}
 

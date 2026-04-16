@@ -277,7 +277,7 @@ _Goal: replace the bare `<video>` with an immersive full-viewport player with cu
 _Goal: user sends a message in the viewer, gets a streamed LLM response, exchange is persisted as events._
 
 **Go backend:**
-- `internal/ai/client.go` — `Client` struct with `ChatStream(ctx, messages) <-chan Chunk`. Supports two providers via `AI_PROVIDER` env var: `"sunset"` (OpenAI-compatible format via `staging.api.sunset.video`) and `"anthropic"` (direct Anthropic Messages API). Both share a common `readSSE` helper with per-provider JSON parse callbacks. No external SSE library.
+- `internal/ai/client.go` — `Client` struct with `ChatStream(ctx, messages) <-chan Chunk`. Supports two providers via `AI_PROVIDER` env var: `"sunset"` (OpenAI-compatible format via `staging.api.sunset.video`) and `"anthropic"` (direct Anthropic Messages API). Both share a common `readSSE` helper with per-provider JSON parse callbacks. No external SSE library. The Sunset path folds `role:"system"` messages into the first user message since the proxy silently drops them in streaming mode. Error responses now include the upstream body for easier debugging.
 - `internal/api/chat.go` — `POST /api/chat` handler. Reads `{session_id, message, video_pos, history}`. Prepends system prompt with video position context, appends history + new user message. Calls `ai.ChatStream`, writes each chunk as an SSE event (`text/event-stream`), flushes after each write. On stream end, persists `ai_message` + `ai_response` events via recorder. Returns 503 if API key not configured.
 - `internal/config/config.go` — Added `AIProvider` (default `"sunset"`) and `AnthropicKey` fields.
 
@@ -285,7 +285,7 @@ _Goal: user sends a message in the viewer, gets a streamed LLM response, exchang
 - `web/src/lib/chat.ts` — `sendMessage(sessionId, message, videoPos, history, onToken, onDone, onError)`: POST fetch to `/api/chat`, reads from `ReadableStream`, buffers partial SSE frames, parses `data:` lines for content tokens. Callback-based API for typewriter rendering.
 - `web/src/routes/watch/+page.svelte` — resizable bottom-drawer chat panel (1/3 viewport default, drag handle to resize). User bubbles left, assistant bubbles right (with markdown rendering via `snarkdown`). Multi-turn conversation history maintained in frontend state. When collapsed, only the prompt input bar shows. Video section fills remaining space above chat panel (flex layout).
 
-**Status:** Verified end-to-end using direct Anthropic API (`AI_PROVIDER=anthropic`). Streaming, multi-turn history, markdown rendering, and event persistence all working. The provided `SUNSET_API_KEY` returns 401 from `staging.api.sunset.video` — may be expired or revoked. The Sunset provider path is implemented and ready for a valid key.
+**Status:** Verified end-to-end with both providers. Streaming, multi-turn history, markdown rendering, and event persistence all working. The Sunset proxy silently drops `role:"system"` messages in streaming mode (returns `data: [DONE]` with 200 status) — fixed by folding system content into the first user message. Frontend guards against empty API responses (removes empty assistant placeholders, filters empty messages from history, skips TTS on empty text).
 
 ---
 
