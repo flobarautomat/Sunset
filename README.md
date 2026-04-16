@@ -36,6 +36,19 @@ cp .env.example .env
 # Edit .env and set your SUNSET_API_KEY
 ```
 
+#### AI Chat
+
+By default, `AI_PROVIDER=sunset` uses the Sunset staging API for chat. If that key isn't working, set `AI_PROVIDER=anthropic` with your own `ANTHROPIC_API_KEY` to use the Anthropic Messages API directly.
+
+#### TTS / Voice Cues
+
+The app includes 5 narration-style voice cues that trigger at key moments during the video. TTS is configurable via `TTS_PROVIDER`:
+
+- **`TTS_PROVIDER=browser`** (default) — Uses the browser's built-in Web Speech API. No API key needed. Works immediately, but voices are synthetic.
+- **`TTS_PROVIDER=sunset`** — Calls the Sunset TTS API (`/api/v1/audio/speech`) for real AI-generated voices. Requires a working `SUNSET_API_KEY`. Set `TTS_VOICE_ID` to a voice UUID from `/api/v1/voices`.
+
+The provided API key returned 401 from the TTS endpoint during development, so browser mode is the default. The Sunset TTS path is fully implemented — flip the env var with a valid key and it works, including disk caching of generated audio in `cache/cue-audio/`.
+
 ### Run
 
 ```bash

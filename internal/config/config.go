@@ -12,6 +12,8 @@ type Config struct {
 	AIModel      string
 	AIProvider   string // "sunset" or "anthropic"
 	AnthropicKey string
+	TTSProvider  string // "sunset" or "browser"
+	TTSVoiceID   string
 }
 
 func Load() (*Config, error) {
@@ -36,6 +38,8 @@ func LoadOrDefault() *Config {
 		AIModel:      envOr("AI_MODEL", "anthropic/claude-haiku-4-5-20251001"),
 		AIProvider:   envOr("AI_PROVIDER", "sunset"),
 		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
+		TTSProvider:  envOr("TTS_PROVIDER", "browser"),
+		TTSVoiceID:   os.Getenv("TTS_VOICE_ID"),
 	}
 }
 

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"os/signal"
@@ -13,6 +14,7 @@ import (
 	"moonrise/internal/config"
 	"moonrise/internal/recorder"
 	"moonrise/internal/store"
+	"moonrise/internal/tts"
 	"moonrise/internal/video"
 
 	"github.com/go-chi/chi/v5"
@@ -36,6 +38,10 @@ func main() {
 	sessionStore := store.NewSessionStore(db)
 	rec := recorder.New(sessionStore)
 
+	if err := sessionStore.SeedCues("data/cues.json"); err != nil {
+		log.Printf("warning: seed cues: %v", err)
+	}
+
 	// Pick AI provider credentials
 	aiKey := cfg.SunsetAPIKey
 	if cfg.AIProvider == "anthropic" {
@@ -43,10 +49,17 @@ func main() {
 	}
 	aiClient := ai.NewClient(cfg.AIProvider, cfg.SunsetAPIURL, aiKey, cfg.AIModel)
 
+	// TTS provider
+	ttsProvider := tts.NewCachedProvider(
+		tts.NewProvider(cfg.TTSProvider, cfg.SunsetAPIURL, cfg.SunsetAPIKey),
+		"cache/cue-audio",
+	)
+
 	videosHandler := &api.VideosHandler{Registry: registry}
 	sessionsHandler := &api.SessionsHandler{Recorder: rec}
-	cuesHandler := &api.CuesHandler{Store: sessionStore}
+	cuesHandler := &api.CuesHandler{Store: sessionStore, TTS: ttsProvider}
 	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec}
+	ttsHandler := &api.TTSHandler{TTS: ttsProvider}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -66,6 +79,15 @@ func main() {
 		r.Post("/sessions/{id}/events", sessionsHandler.RecordEvents)
 
 		r.Post("/chat", chatHandler.Send)
+
+		r.Get("/cue-audio", cuesHandler.Audio)
+		r.Post("/tts", ttsHandler.Speak)
+		r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"tts_provider": cfg.TTSProvider,
+			})
+		})
 	})
 
 	srv := &http.Server{

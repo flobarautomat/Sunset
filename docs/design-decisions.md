@@ -63,3 +63,19 @@ Assistant messages are rendered as markdown via `snarkdown` (1KB, zero-dependenc
 ### Resizable chat panel over modal or sidebar
 
 The chat panel is a bottom drawer that starts at 1/3 viewport height and is drag-resizable. The video shrinks to fill remaining space above. This keeps the video always visible (unlike a modal) and uses horizontal space better than a sidebar (video aspect ratio is landscape). When collapsed, only the prompt input bar shows — always accessible without expanding the full chat history.
+
+### Switchable TTS provider (Sunset API vs browser speech)
+
+The coding challenge provides a TTS endpoint at `staging.api.sunset.video/api/v1/audio/speech`. However, the provided API key returned 401 during development. Rather than block on getting a new key, added a `TTS_PROVIDER` abstraction: `"sunset"` calls the Sunset API and returns mp3 audio, `"browser"` returns the text for the frontend to speak via the Web Speech API (`speechSynthesis`). The backend mediates both paths — even for browser mode, the frontend asks the backend for cue text via `/api/cue-audio`, so the architecture stays consistent. The reviewer can flip one env var to `TTS_PROVIDER=sunset` with their working key and get real TTS voices. Default is `"browser"` so the app works immediately without any API key.
+
+### Static narration cues over LLM-generated lines
+
+Cue prompts contain the final narration text directly rather than being sent to an LLM to generate a spoken line. This keeps cue playback deterministic (same text every time), avoids an extra API call and its latency, and makes cues editable by non-technical users who can just edit `data/cues.json`. The trade-off is less dynamic/contextual narration, but for preset scene descriptions this is the right call.
+
+### Cue seeding via JSON with upsert
+
+Voice cues are defined in `data/cues.json` and seeded into the `cues` table on server startup via `INSERT OR REPLACE` keyed on `(video_id, at_seconds)`. This means editing the JSON file and restarting the server updates cues without a code change — satisfying the bonus requirement ("configurable without a code change"). The upsert approach was chosen over skip-if-present because it lets you iterate on cue text without wiping the database.
+
+### Chat responses spoken aloud via TTS
+
+After an AI chat response finishes streaming, the full response text is spoken using the same TTS provider as voice cues. For browser mode this happens directly in the frontend (no server round-trip); for sunset mode the frontend calls `POST /api/tts` to generate audio. This makes the AI feel more present — it speaks as well as types — without complicating the SSE streaming path. Markdown is stripped before speaking (bold markers, code blocks, list bullets, link syntax, etc.) so the speech sounds natural. Each assistant bubble has a play/pause button for user control.

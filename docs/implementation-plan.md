@@ -154,6 +154,7 @@ moonrise/
 ├── internal/
 │   ├── api/          # chi handlers
 │   ├── ai/           # AI client (Sunset proxy + direct Anthropic)
+│   ├── tts/          # TTS provider (Sunset API + browser speech fallback)
 │   ├── config/       # Config struct, env parsing
 │   ├── recorder/     # session + event logic (unit tested)
 │   ├── video/        # mp4 metadata + in-memory registry
@@ -288,22 +289,36 @@ _Goal: user sends a message in the viewer, gets a streamed LLM response, exchang
 
 ---
 
-### Phase 4 — Voice cues + TTS
+### Phase 4 — Voice cues + TTS ✅
 
-_Goal: at configured timecodes, the AI speaks over the video. Audio is generated once and cached._
+_Goal: at configured timecodes, the AI speaks over the video. Chat responses are also spoken aloud. TTS provider is configurable._
+
+**Status: COMPLETE**
+
+**What was built:**
 
 **Go backend:**
-- `internal/ai/tts.go` — `GenerateSpeech(ctx, text, voiceID) ([]byte, error)` — calls `/api/v1/audio/speech`, returns raw mp3 bytes
-- `internal/cues/loader.go` — on startup, reads `data/cues.json`, upserts into `cues` table. Exposes `GetCuesForVideo(videoID) []Cue`.
-- `internal/cues/cache.go` — `GetOrGenerateAudio(cue) ([]byte, error)` — checks disk cache at `cache/cue-audio/{sha256}.mp3`, if miss: calls LLM with cue's `prompt` to get a spoken line → calls `tts.GenerateSpeech` → writes to disk → returns bytes
-- `internal/api/cues.go` — `GET /api/videos/:id/cues` (returns cue list) and `GET /api/cue-audio?cue_id=...` (serves cached mp3, generates on first request)
-- `data/cues.json` — seed file, e.g. `[{"video_id": "default", "at_seconds": 8.0, "prompt": "Greet the viewer", "voice_id": "..."}]`
+- `internal/tts/tts.go` — `Provider` interface with `Speak(ctx, text, voiceID) (*Result, error)`. `Result` contains either mp3 audio bytes (`Type: "audio"`) or text for browser synthesis (`Type: "text"`). `NewProvider(provider, apiURL, apiKey)` factory returns sunset or browser provider.
+- `internal/tts/sunset.go` — Sunset provider: POST to `/api/v1/audio/speech`, returns mp3 bytes. Uses `Authorization: Bearer` header.
+- `internal/tts/browser.go` — Browser provider: returns text directly, no network call.
+- `internal/tts/cache.go` — `CachedProvider` wraps any provider. Caches audio results to `cache/cue-audio/{sha256}.mp3`. Text results pass through uncached.
+- `internal/store/cueloader.go` — `SeedCues(path)` reads `data/cues.json` and upserts into `cues` table via `INSERT OR REPLACE` on `(video_id, at_seconds)`.
+- `internal/store/sessions.go` — Added `GetCue(id)` method for single cue lookup.
+- `internal/api/cues.go` — Expanded `CuesHandler` with `TTS` field. Added `Audio(w, r)` handler for `GET /api/cue-audio?cue_id=N` — returns mp3 bytes or JSON text depending on provider.
+- `internal/api/tts.go` — `TTSHandler` with `Speak(w, r)` for `POST /api/tts` — used by frontend for chat response TTS.
+- `cmd/server/main.go` — Wired cue seeding, TTS provider, new routes (`/api/cue-audio`, `/api/tts`, `/api/config`).
+- `data/cues.json` — 5 narration-style cues for Heat at ~3:00, ~34:00, ~1:15:00, ~2:00:00, ~2:40:00.
 
 **SvelteKit viewer:**
-- `web/src/lib/cueScheduler.ts` — `createCueScheduler(videoEl, sessionId)`: fetches `/api/videos/:id/cues` once. On each `timeupdate`, checks if `prevTime < cue.at_seconds <= currentTime`. If triggered: fetches `/api/cue-audio?cue_id=...` as a blob, plays via a hidden `<audio>` element, posts a `cue_played` event. Handles seek (recomputes next cue index).
-- `web/src/routes/watch/+page.svelte` — add hidden `<audio id="cue">`, wire up cue scheduler alongside the tracker
+- `web/src/lib/speech.ts` — `speak(text, id?)`, `pause()`, `resume()`, `cancel()` wrapping browser `speechSynthesis` API. Strips markdown before speaking (bold, links, code blocks, list markers, etc.). Exposes reactive state via `onChange` listener for UI binding.
+- `web/src/lib/cueScheduler.ts` — `createCueScheduler(videoEl, {cues, sessionId})`: listens to `timeupdate`, triggers when `prevTime < at_seconds <= currentTime`. Fetches `/api/cue-audio`, checks `Content-Type` to decide between `<audio>` playback or `speechSynthesis`. Posts `cue_played` events. Handles seek backward (re-enables cues).
+- `web/src/routes/watch/+page.svelte` — Wired cue scheduler on mount. Chat `onDone` callback speaks the response via browser speech or `/api/tts`. Per-bubble speech controls on assistant messages (play/pause/resume). Fetches `/api/config` to determine TTS provider mode. Cleanup cancels speech on unmount.
 
-**Verify:** play the video past the configured timecode, hear the AI voice. Seek backward past it and replay — it fires again. Check `events` for `cue_played`.
+**Key decisions (see `docs/design-decisions.md`):**
+- TTS provider abstraction — same pattern as AI chat provider, reviewer flips one env var
+- Static narration cues — deterministic, no LLM call needed
+- Cue seeding via upsert — edit JSON + restart to reconfigure (bonus: "configurable without code change")
+- Chat responses spoken aloud — makes AI feel more present
 
 ---
 

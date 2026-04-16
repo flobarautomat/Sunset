@@ -94,6 +94,16 @@ type Cue struct {
 	VoiceID   string  `json:"voice_id"`
 }
 
+// GetCue returns a single cue by ID.
+func (s *SessionStore) GetCue(id int) (*Cue, error) {
+	row := s.db.QueryRow(`SELECT id, video_id, at_seconds, prompt, voice_id FROM cues WHERE id = ?`, id)
+	var c Cue
+	if err := row.Scan(&c.ID, &c.VideoID, &c.AtSeconds, &c.Prompt, &c.VoiceID); err != nil {
+		return nil, err
+	}
+	return &c, nil
+}
+
 // ListCues returns enabled cues for a video ordered by time.
 func (s *SessionStore) ListCues(videoID string) ([]Cue, error) {
 	rows, err := s.db.Query(

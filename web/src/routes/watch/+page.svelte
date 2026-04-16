@@ -2,6 +2,8 @@
 	import { onMount, tick } from 'svelte';
 	import { createTracker } from '$lib/tracker';
 	import { sendMessage, type ChatMessage } from '$lib/chat';
+	import { createCueScheduler } from '$lib/cueScheduler';
+	import { speak, pause as pauseSpeech, resume as resumeSpeech, cancel as cancelSpeech, getState as getSpeechState, getActiveId as getSpeechActiveId, onChange as onSpeechChange } from '$lib/speech';
 	import snarkdown from 'snarkdown';
 
 	interface Cue {
@@ -30,6 +32,7 @@
 	let promptText = $state('');
 	let seeking = $state(false);
 	let backendDuration = $state(0);
+	let ttsProvider = $state<'browser' | 'sunset'>('browser');
 
 	// Chat state
 	let chatMessages = $state<ChatMessage[]>([]);
@@ -37,6 +40,23 @@
 	let chatHeight = $state(300);
 	let streaming = $state(false);
 	let dragging = $state(false);
+
+	// Speech state — reactive via onChange listener
+	let speechState = $state<'idle' | 'speaking' | 'paused'>('idle');
+	let speechActiveId = $state<string | null>(null);
+
+	function toggleSpeech(msgIndex: number, content: string) {
+		const id = `msg-${msgIndex}`;
+		if (getSpeechActiveId() === id) {
+			if (getSpeechState() === 'speaking') {
+				pauseSpeech();
+			} else if (getSpeechState() === 'paused') {
+				resumeSpeech();
+			}
+		} else {
+			speak(content, id);
+		}
+	}
 
 	let hideTimeout: ReturnType<typeof setTimeout>;
 
@@ -187,8 +207,26 @@
 					if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
 				});
 			},
-			() => {
+			(fullText) => {
 				streaming = false;
+				if (ttsProvider === 'browser') {
+					speak(fullText);
+				} else {
+					fetch('/api/tts', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ text: fullText, voice_id: '' })
+					})
+						.then((res) => {
+							if (res.headers.get('content-type')?.includes('audio/mpeg')) {
+								return res.blob().then((blob) => {
+									const url = URL.createObjectURL(blob);
+									new Audio(url).play();
+								});
+							}
+						})
+						.catch(console.error);
+				}
 			},
 			(error) => {
 				streaming = false;
@@ -202,12 +240,31 @@
 	}
 
 	onMount(() => {
-		let cleanup: (() => void) | undefined;
+		let trackerCleanup: (() => void) | undefined;
+		let cueCleanup: (() => void) | undefined;
+
+		const speechCleanup = onSpeechChange(() => {
+			speechState = getSpeechState();
+			speechActiveId = getSpeechActiveId();
+		});
 
 		chatHeight = Math.round(window.innerHeight / 3);
 
 		async function init() {
 			try {
+				// Fetch TTS config
+				try {
+					const configRes = await fetch('/api/config');
+					if (configRes.ok) {
+						const cfg = await configRes.json();
+						if (cfg.tts_provider === 'sunset' || cfg.tts_provider === 'browser') {
+							ttsProvider = cfg.tts_provider;
+						}
+					}
+				} catch {
+					// Non-critical, defaults to browser
+				}
+
 				const res = await fetch('/api/sessions', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -220,7 +277,7 @@
 				const data = await res.json();
 				sessionId = data.session_id;
 				status = 'connected';
-				cleanup = createTracker(sessionId, videoEl);
+				trackerCleanup = createTracker(sessionId, videoEl);
 
 				try {
 					const videosRes = await fetch('/api/videos');
@@ -239,6 +296,9 @@
 					const cueRes = await fetch('/api/videos/default/cues');
 					if (cueRes.ok) {
 						cues = await cueRes.json();
+						if (cues.length > 0) {
+							cueCleanup = createCueScheduler(videoEl, { cues, sessionId });
+						}
 					}
 				} catch {
 					// Cues are non-critical
@@ -252,7 +312,10 @@
 
 		return () => {
 			clearTimeout(hideTimeout);
-			if (cleanup) cleanup();
+			cancelSpeech();
+			speechCleanup();
+			if (trackerCleanup) trackerCleanup();
+			if (cueCleanup) cueCleanup();
 		};
 	});
 
@@ -373,15 +436,42 @@
 
 		{#if chatOpen}
 			<div class="chat-messages" bind:this={messagesEl}>
-				{#each chatMessages as msg}
-					<div class="bubble {msg.role}">
-						{#if msg.role === 'assistant'}
-							{@html snarkdown(msg.content)}
-							{#if streaming && msg === chatMessages[chatMessages.length - 1] && !msg.content}
-								<span class="typing-indicator">...</span>
+				{#each chatMessages as msg, i}
+					<div class="bubble-row {msg.role}">
+						<div class="bubble {msg.role}">
+							{#if msg.role === 'assistant'}
+								{@html snarkdown(msg.content)}
+								{#if streaming && msg === chatMessages[chatMessages.length - 1] && !msg.content}
+									<span class="typing-indicator">...</span>
+								{/if}
+							{:else}
+								{msg.content}
 							{/if}
-						{:else}
-							{msg.content}
+						</div>
+						{#if msg.role === 'assistant' && msg.content}
+							<button
+								class="speech-btn"
+								class:active={speechActiveId === `msg-${i}`}
+								onclick={() => toggleSpeech(i, msg.content)}
+								aria-label={speechActiveId === `msg-${i}` && speechState === 'speaking' ? 'Pause speech' : 'Speak message'}
+							>
+								{#if speechActiveId === `msg-${i}` && speechState === 'speaking'}
+									<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+										<rect x="6" y="4" width="4" height="16" />
+										<rect x="14" y="4" width="4" height="16" />
+									</svg>
+								{:else if speechActiveId === `msg-${i}` && speechState === 'paused'}
+									<svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+										<polygon points="5,3 19,12 5,21" />
+									</svg>
+								{:else}
+									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+										<polygon points="11,5 6,9 2,9 2,15 6,15 11,19" fill="currentColor" />
+										<path d="M15.54 8.46a5 5 0 010 7.07" />
+										<path d="M19.07 4.93a10 10 0 010 14.14" />
+									</svg>
+								{/if}
+							</button>
 						{/if}
 					</div>
 				{/each}
@@ -488,6 +578,7 @@
 		background: rgba(255, 255, 255, 0.2);
 		border-radius: 2px;
 		position: relative;
+		z-index: 0;
 		transition: height 0.15s ease;
 	}
 
@@ -512,6 +603,7 @@
 		background: #e50914;
 		border-radius: 50%;
 		transform: translate(-50%, -50%);
+		z-index: 1;
 		opacity: 0;
 		transition: opacity 0.15s ease;
 	}
@@ -650,14 +742,12 @@
 	}
 
 	.bubble.user {
-		align-self: flex-start;
 		background: rgba(255, 255, 255, 0.1);
 		color: #fff;
 		border-bottom-left-radius: 4px;
 	}
 
 	.bubble.assistant {
-		align-self: flex-end;
 		background: #e50914;
 		color: #fff;
 		border-bottom-right-radius: 4px;
@@ -696,6 +786,50 @@
 	.bubble.assistant :global(a) {
 		color: #ffd4d6;
 		text-decoration: underline;
+	}
+
+	.bubble-row {
+		display: flex;
+		align-items: flex-end;
+		gap: 6px;
+	}
+
+	.bubble-row.user {
+		justify-content: flex-start;
+	}
+
+	.bubble-row.assistant {
+		justify-content: flex-end;
+	}
+
+	.speech-btn {
+		background: rgba(255, 255, 255, 0.1);
+		border: none;
+		border-radius: 50%;
+		width: 28px;
+		height: 28px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		cursor: pointer;
+		color: rgba(255, 255, 255, 0.5);
+		flex-shrink: 0;
+		transition: color 0.15s ease, background 0.15s ease;
+		margin-bottom: 4px;
+	}
+
+	.speech-btn:hover {
+		color: #fff;
+		background: rgba(255, 255, 255, 0.2);
+	}
+
+	.speech-btn.active {
+		color: #e50914;
+		background: rgba(229, 9, 20, 0.15);
+	}
+
+	.speech-btn.active:hover {
+		background: rgba(229, 9, 20, 0.25);
 	}
 
 	.typing-indicator {
