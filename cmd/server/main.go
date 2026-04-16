@@ -8,8 +8,11 @@ import (
 	"syscall"
 	"time"
 
+	"moonrise/internal/api"
 	"moonrise/internal/config"
+	"moonrise/internal/recorder"
 	"moonrise/internal/store"
+	"moonrise/internal/video"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -24,6 +27,17 @@ func main() {
 	}
 	defer db.Close()
 
+	registry, err := video.NewRegistry("data/videos")
+	if err != nil {
+		log.Printf("warning: video registry: %v", err)
+	}
+
+	sessionStore := store.NewSessionStore(db)
+	rec := recorder.New(sessionStore)
+
+	videosHandler := &api.VideosHandler{Registry: registry}
+	sessionsHandler := &api.SessionsHandler{Recorder: rec}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -33,16 +47,21 @@ func main() {
 		r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte("ok"))
 		})
+
+		r.Get("/videos", videosHandler.List)
+		r.Get("/videos/{id}/stream", videosHandler.Stream)
+
+		r.Post("/sessions", sessionsHandler.Create)
+		r.Post("/sessions/{id}/events", sessionsHandler.RecordEvents)
 	})
 
-	_ = cfg // will be passed to handlers in later phases
+	_ = cfg
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

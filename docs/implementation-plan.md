@@ -35,10 +35,10 @@ Single Go binary serves the REST API, WebSocket hub, and proxies AI calls. Svelt
 
 ## 3. Tech stack
 
-- **Backend:** Go 1.22, `net/http` + `chi` router, `nhooyr.io/websocket`, `modernc.org/sqlite`.
-- **Frontend:** SvelteKit 2 + Svelte 5, TypeScript, minimal CSS (no Tailwind to keep deps light).
+- **Backend:** Go 1.26, `net/http` + `chi` router, `nhooyr.io/websocket`, `modernc.org/sqlite`, `alfg/mp4` (metadata), `google/uuid`.
+- **Frontend:** SvelteKit 2 + Svelte 5, TypeScript, minimal CSS (no Tailwind to keep deps light). Node 22 (required by SvelteKit's supported range).
 - **AI:** `staging.api.sunset.video` for chat completions and TTS. Server-side proxy — API key never touches the browser.
-- **Build/run:** single `make dev` or `./run.sh` that starts Go + Vite together. `docker compose` optional if time allows.
+- **Build/run:** `./run.sh` starts Go + Vite together, auto-detects Node 22.
 
 ## 4. Data model (SQLite)
 
@@ -132,13 +132,14 @@ Generation pipeline per cue:
 ## 10. Session recording unit tests (bonus)
 
 Target the pure-Go `recorder` package (no HTTP, no DB dependency — inject an `EventStore` interface):
-- `TestRecorder_BatchesHeartbeats` — collapses N heartbeats within a window into one.
-- `TestRecorder_RejectsUnknownKind`.
-- `TestRecorder_ClampsVideoPos` (negative / > duration).
+- `TestRecorder_CreateSession` — returns valid UUID, session persisted with correct fields.
+- `TestRecorder_BatchesHeartbeats` — collapses N heartbeats within a 5s window into one.
+- `TestRecorder_RejectsUnknownKind` — returns error for invalid event kinds.
+- `TestRecorder_ClampsVideoPos` — negative video_pos clamped to 0.
 - `TestRecorder_OrderingWithSeek` — seek followed by play emits events in correct logical order.
-- `TestRecorder_IdleTransition` — store behavior across the idle threshold.
+- `TestRecorder_IdleTransition` — `last_seen_at` updated on event receipt.
 
-Use `testing` + `testify/assert`. In-memory `EventStore` fake for speed.
+Use `testing` + `testify/assert` + `testify/require`. In-memory `fakeStore` for speed. All 6 pass.
 
 ## 11. Project layout
 
@@ -150,20 +151,21 @@ moonrise/
 ├── internal/
 │   ├── api/          # chi handlers
 │   ├── ai/           # client for staging.api.sunset.video
+│   ├── config/       # Config struct, env parsing
 │   ├── recorder/     # session + event logic (unit tested)
+│   ├── video/        # mp4 metadata + in-memory registry
 │   ├── cues/         # cue loader + audio cache
 │   ├── pubsub/       # in-proc bus
-│   ├── store/        # sqlite queries
+│   ├── store/        # sqlite queries + migrations
 │   └── ws/           # websocket hub
 ├── data/
 │   ├── cues.json
 │   └── videos/
-│       └── default.mp4           # freely-licensed clip, served by backend
+│       └── default.mp4           # ~2GB, gitignored, see README
 ├── web/                          # SvelteKit app
 │   ├── src/routes/watch/+page.svelte
 │   ├── src/routes/admin/+page.svelte
 │   └── src/lib/
-└── static/video.mp4
 ```
 
 ## 12. Implementation phases
@@ -218,22 +220,29 @@ _Goal: both servers start, talk to each other, and persist data. Nothing visible
 
 ---
 
-### Phase 2 — Video playback + session tracking (+ unit tests)
+### Phase 2 — Video playback + session tracking (+ unit tests) ✅
 
 _Goal: a user watches a video, and every play/pause/seek lands in SQLite. Tests prove the recorder logic is correct._
 
-**Go backend:**
-- `internal/api/videos.go` — `GET /api/videos` (list available videos from `data/videos/`) and `GET /api/videos/:id/stream` (serve video file via `http.ServeContent` with range request support)
-- `internal/recorder/recorder.go` — `Recorder` struct with `CreateSession(ua, videoID)` and `RecordEvents(sessionID, []Event)`. Accepts an `EventStore` interface so it's testable without a DB. Validates event kinds, clamps `video_pos`, collapses rapid heartbeats.
-- `internal/recorder/recorder_test.go` — the 5 tests from section 10 (`BatchesHeartbeats`, `RejectsUnknownKind`, `ClampsVideoPos`, `OrderingWithSeek`, `IdleTransition`). In-memory `EventStore` fake.
-- `internal/store/sessions.go` — SQLite implementation of `EventStore` interface
-- `internal/api/sessions.go` — `POST /api/sessions` (creates session, returns `{session_id}`) and `POST /api/sessions/:id/events` (accepts batch, calls recorder)
+**Status: COMPLETE**
 
-**SvelteKit viewer:**
-- `web/src/lib/tracker.ts` — `createTracker(sessionId)`: attaches `play`, `pause`, `seeking`, `ended`, `timeupdate` listeners to a `<video>` element, buffers events, flushes to `/api/sessions/:id/events` every 2s, sends heartbeat every 10s
-- `web/src/routes/watch/+page.svelte` — mounts `<video src="/api/videos/default/stream">`, calls `POST /api/sessions` on mount, wires up tracker
+**What was built:**
+- `internal/video/registry.go` — scans `data/videos/` at startup, extracts mp4 metadata (duration, resolution, bitrate) via `alfg/mp4`, builds in-memory registry
+- `internal/api/videos.go` — `GET /api/videos` (list with metadata) and `GET /api/videos/{id}/stream` (serve via `http.ServeContent` with range requests)
+- `internal/recorder/recorder.go` — `Recorder` with `EventStore` interface. Validates event kinds, clamps negative `video_pos` to 0, collapses heartbeats within 5s window. Owns session creation (generates UUID) and event recording.
+- `internal/recorder/recorder_test.go` — 6 tests: `CreateSession`, `BatchesHeartbeats`, `RejectsUnknownKind`, `ClampsVideoPos`, `OrderingWithSeek`, `IdleTransition`. All pass with in-memory fake store.
+- `internal/store/sessions.go` — SQLite `EventStore` implementation with transaction batching for events. Also exposes `ListSessions` and `ListEvents` for the dashboard (Phase 5).
+- `internal/api/sessions.go` — `POST /api/sessions` and `POST /api/sessions/{id}/events`. Thin handlers that decode JSON and delegate to recorder.
+- `web/src/lib/tracker.ts` — `createTracker(sessionId, videoEl)`: listens for play/pause/seeking/ended, buffers events, flushes every 2s, heartbeat every 10s. Re-queues on flush failure.
+- `web/src/routes/watch/+page.svelte` — video player with `src="/api/videos/default/stream"`, creates session on mount, wires tracker, cleanup on unmount.
 
-**Verify:** play/pause the video, then `sqlite3 moonrise.db "SELECT kind, video_pos FROM events ORDER BY at"` shows the event trail. `go test ./internal/recorder/...` passes.
+**Key decisions (see `docs/design-decisions.md`):**
+- MP4 metadata extracted at startup with pure-Go parser — no ffprobe dependency
+- Recorder owns sessions + events behind injected interface — API handlers are thin
+- Only heartbeats collapsed (5s window); play/pause/seek pass through as-is
+- Time-based batching (2s interval) — simple and predictable
+
+**Verified:** `go test ./internal/recorder/... -v` → 6/6 pass, `go build ./...` clean
 
 ---
 
@@ -321,5 +330,5 @@ Lead with the 3–5 choices I expect to defend:
 ## 15. Open questions for Brian
 
 - ~~Should the dashboard show AI message content, or just metadata?~~ → **Resolved: show content**, note privacy cut in README.
-- Any preference on the video clip (length, tone)? Short clip (~30–60s) makes cue testing faster.
+- ~~Any preference on the video clip (length, tone)?~~ → **Resolved: using Heat (~2GB, ~2.8hrs)**. Real movie file exercises realistic I/O. Gitignored, Google Drive link in README.
 - Want me to include a `docker compose up` path, or is `./run.sh` enough?

@@ -32,6 +32,14 @@ Videos live in `data/videos/` and are served by the Go backend via `http.ServeCo
 
 Using a full-length ~2GB movie file instead of a 30-second freely-licensed clip. This exercises realistic conditions: range requests across a large file, seeking behavior, buffering, and the kind of I/O the backend would actually handle in production. The backend serves it from disk via `http.ServeContent` — this is the production serving path, not a demo shortcut. The file is gitignored because large binaries don't belong in version control; the README tells the reviewer where to download it and where to place it.
 
+### MP4 metadata extraction via `alfg/mp4`
+
+Extract duration, resolution, and bitrate from mp4 files at startup using a pure-Go mp4 parser. No CGO, no ffprobe dependency. Duration feeds cue validation (is `at_seconds` within range?), resolution and bitrate give the dashboard richer context per session. Metadata is computed once at startup and cached in an in-memory registry — the video directory is not re-scanned on every request.
+
+### Recorder with injected EventStore
+
+The recorder owns both session creation and event recording behind an `EventStore` interface. API handlers are thin — they decode JSON and call the recorder. This makes the core logic unit-testable with an in-memory fake store (no database, no HTTP). Only heartbeats are collapsed (within a 5s window); play/pause/seek pass through as-is since they're cheap and the dashboard can filter if needed.
+
 ### CORS as a simple middleware
 
 A minimal CORS handler that allows all origins. Fine for local dev and a demo — no need for a CORS library. Would tighten `Access-Control-Allow-Origin` to specific domains in production.
