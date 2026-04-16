@@ -153,7 +153,7 @@ moonrise/
 ├── cmd/server/main.go
 ├── internal/
 │   ├── api/          # chi handlers
-│   ├── ai/           # client for staging.api.sunset.video
+│   ├── ai/           # AI client (Sunset proxy + direct Anthropic)
 │   ├── config/       # Config struct, env parsing
 │   ├── recorder/     # session + event logic (unit tested)
 │   ├── video/        # mp4 metadata + in-memory registry
@@ -276,14 +276,15 @@ _Goal: replace the bare `<video>` with an immersive full-viewport player with cu
 _Goal: user sends a message in the viewer, gets a streamed LLM response, exchange is persisted as events._
 
 **Go backend:**
-- `internal/ai/client.go` — `Client` struct with `ChatStream(ctx, messages) <-chan Chunk`. POST to `staging.api.sunset.video/api/v1/chat/completions` with `stream: true`, parses SSE line-by-line via `bufio.Scanner`, yields `Chunk{Text, Done, Err}` on a channel. No external SSE library.
+- `internal/ai/client.go` — `Client` struct with `ChatStream(ctx, messages) <-chan Chunk`. Supports two providers via `AI_PROVIDER` env var: `"sunset"` (OpenAI-compatible format via `staging.api.sunset.video`) and `"anthropic"` (direct Anthropic Messages API). Both share a common `readSSE` helper with per-provider JSON parse callbacks. No external SSE library.
 - `internal/api/chat.go` — `POST /api/chat` handler. Reads `{session_id, message, video_pos, history}`. Prepends system prompt with video position context, appends history + new user message. Calls `ai.ChatStream`, writes each chunk as an SSE event (`text/event-stream`), flushes after each write. On stream end, persists `ai_message` + `ai_response` events via recorder. Returns 503 if API key not configured.
+- `internal/config/config.go` — Added `AIProvider` (default `"sunset"`) and `AnthropicKey` fields.
 
 **SvelteKit viewer:**
 - `web/src/lib/chat.ts` — `sendMessage(sessionId, message, videoPos, history, onToken, onDone, onError)`: POST fetch to `/api/chat`, reads from `ReadableStream`, buffers partial SSE frames, parses `data:` lines for content tokens. Callback-based API for typewriter rendering.
-- `web/src/routes/watch/+page.svelte` — resizable bottom-drawer chat panel (1/3 viewport default, drag handle to resize). User bubbles left, assistant bubbles right. Multi-turn conversation history maintained in frontend state. When collapsed, only the prompt input bar shows. Video section fills remaining space above chat panel (flex layout).
+- `web/src/routes/watch/+page.svelte` — resizable bottom-drawer chat panel (1/3 viewport default, drag handle to resize). User bubbles left, assistant bubbles right (with markdown rendering via `snarkdown`). Multi-turn conversation history maintained in frontend state. When collapsed, only the prompt input bar shows. Video section fills remaining space above chat panel (flex layout).
 
-**Status:** Code complete, not yet verified end-to-end. The provided `SUNSET_API_KEY` returns 401 ("invalid API key") from `staging.api.sunset.video`. The request format matches the docs exactly (Bearer auth, `provider/model-name` model format, correct endpoint). Awaiting a valid API key to verify streaming, multi-turn history, and event persistence.
+**Status:** Verified end-to-end using direct Anthropic API (`AI_PROVIDER=anthropic`). Streaming, multi-turn history, markdown rendering, and event persistence all working. The provided `SUNSET_API_KEY` returns 401 from `staging.api.sunset.video` — may be expired or revoked. The Sunset provider path is implemented and ready for a valid key.
 
 ---
 

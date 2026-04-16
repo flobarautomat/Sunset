@@ -52,6 +52,14 @@ Native `<video controls>` can't render cue markers on the seek bar or provide a 
 
 The Go backend proxies chat requests to the Sunset staging API (`staging.api.sunset.video/api/v1/chat/completions`) with SSE streaming. The backend is stateless — the frontend owns conversation history and sends the full message array with each request. This avoids server-side session memory management and keeps the backend simple. Events (`ai_message`, `ai_response`) are persisted to SQLite after each exchange for analytics, but are never used to reconstruct conversation state. The model is configurable via `AI_MODEL` env var (defaults to `anthropic/claude-haiku-4-5-20251001` for speed; can switch to sonnet for quality).
 
+### Switchable AI provider (Sunset proxy vs direct Anthropic)
+
+The Sunset staging API key was returning 401 during development. Rather than block on getting a new key, added a provider abstraction: `AI_PROVIDER=sunset` talks the OpenAI-compatible format through the Sunset proxy, `AI_PROVIDER=anthropic` talks directly to the Anthropic Messages API with a personal key. The two providers share a common `readSSE` helper that handles HTTP + line-by-line SSE parsing, with per-provider parse callbacks for the different JSON shapes (OpenAI's `choices[0].delta.content` vs Anthropic's `content_block_delta`). The `ChatStream` channel interface is identical to callers — the chat handler doesn't know which provider is active.
+
+### Markdown rendering in chat bubbles
+
+Assistant messages are rendered as markdown via `snarkdown` (1KB, zero-dependency parser). User messages stay as plain text. This lets the AI use bold, lists, code blocks, and links naturally — which it does by default — without the output looking like raw markup. Chose snarkdown over heavier parsers (marked, markdown-it) because the chat context doesn't need footnotes, tables, or GFM extensions.
+
 ### Resizable chat panel over modal or sidebar
 
 The chat panel is a bottom drawer that starts at 1/3 viewport height and is drag-resizable. The video shrinks to fill remaining space above. This keeps the video always visible (unlike a modal) and uses horizontal space better than a sidebar (video aspect ratio is landscape). When collapsed, only the prompt input bar shows — always accessible without expanding the full chat history.

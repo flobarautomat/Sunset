@@ -2,6 +2,7 @@
 	import { onMount, tick } from 'svelte';
 	import { createTracker } from '$lib/tracker';
 	import { sendMessage, type ChatMessage } from '$lib/chat';
+	import snarkdown from 'snarkdown';
 
 	interface Cue {
 		id: number;
@@ -374,9 +375,13 @@
 			<div class="chat-messages" bind:this={messagesEl}>
 				{#each chatMessages as msg}
 					<div class="bubble {msg.role}">
-						{msg.content}
-						{#if msg.role === 'assistant' && streaming && msg === chatMessages[chatMessages.length - 1] && !msg.content}
-							<span class="typing-indicator">...</span>
+						{#if msg.role === 'assistant'}
+							{@html snarkdown(msg.content)}
+							{#if streaming && msg === chatMessages[chatMessages.length - 1] && !msg.content}
+								<span class="typing-indicator">...</span>
+							{/if}
+						{:else}
+							{msg.content}
 						{/if}
 					</div>
 				{/each}
@@ -638,6 +643,9 @@
 		font-family: system-ui, -apple-system, sans-serif;
 		line-height: 1.4;
 		word-wrap: break-word;
+	}
+
+	.bubble.user {
 		white-space: pre-wrap;
 	}
 
@@ -653,6 +661,41 @@
 		background: #e50914;
 		color: #fff;
 		border-bottom-right-radius: 4px;
+		white-space: normal;
+	}
+
+	.bubble.assistant :global(p) {
+		margin: 0 0 0.5em;
+	}
+
+	.bubble.assistant :global(p:last-child) {
+		margin-bottom: 0;
+	}
+
+	.bubble.assistant :global(strong) {
+		font-weight: 700;
+	}
+
+	.bubble.assistant :global(ul),
+	.bubble.assistant :global(ol) {
+		margin: 0.3em 0;
+		padding-left: 1.4em;
+	}
+
+	.bubble.assistant :global(li) {
+		margin-bottom: 0.2em;
+	}
+
+	.bubble.assistant :global(code) {
+		background: rgba(0, 0, 0, 0.2);
+		padding: 1px 5px;
+		border-radius: 3px;
+		font-size: 0.85em;
+	}
+
+	.bubble.assistant :global(a) {
+		color: #ffd4d6;
+		text-decoration: underline;
 	}
 
 	.typing-indicator {
