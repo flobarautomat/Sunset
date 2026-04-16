@@ -162,10 +162,11 @@ moonrise/
 │   ├── pubsub/       # in-proc bus
 │   ├── store/        # sqlite queries + migrations
 │   └── ws/           # websocket hub
-├── data/
-│   ├── cues.json
-│   └── videos/
-│       └── default.mp4           # ~2GB, gitignored, see README
+├── data/films/                   # per-film directories
+│   └── heat/
+│       ├── film.mp4              # ~2GB, gitignored, see README
+│       ├── cues.json             # voice cue definitions
+│       └── metadata.json         # title, year, director, synopsis
 ├── web/                          # SvelteKit app
 │   ├── src/routes/watch/+page.svelte
 │   ├── src/routes/admin/+page.svelte

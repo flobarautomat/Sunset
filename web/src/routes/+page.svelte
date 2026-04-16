@@ -40,10 +40,10 @@ cd web && npm install && cd ..</code></pre>
 			<p>The demo uses a real video file (~2 GB) that's too large for git.</p>
 			<ol>
 				<li>Download from: <a href="https://drive.google.com/file/d/1nEugaQe9h2ZUtQbnQNC_Nwtg1NHL3CKc/view?usp=drive_link" class="link" target="_blank" rel="noopener">Google Drive</a></li>
-				<li>Save to: <code>data/videos/default.mp4</code></li>
+				<li>Save to: <code>data/films/heat/film.mp4</code></li>
 			</ol>
-			<pre><code>mkdir -p data/videos
-mv ~/Downloads/Heat.mp4 data/videos/default.mp4</code></pre>
+			<pre><code>mkdir -p data/films/heat
+mv ~/Downloads/Heat.mp4 data/films/heat/film.mp4</code></pre>
 
 			<h3>Configure environment</h3>
 			<pre><code>cp .env.example .env

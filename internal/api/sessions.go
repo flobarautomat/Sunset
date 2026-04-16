@@ -30,7 +30,7 @@ func (h *SessionsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.VideoID == "" {
-		req.VideoID = "default"
+		req.VideoID = "heat"
 	}
 
 	ua := r.UserAgent()

@@ -18,9 +18,7 @@ web/build/
 *.db-shm
 
 # Video assets (large binaries — download separately, see README)
-data/videos/*.mp4
-data/videos/*.mkv
-data/videos/*.mov
+data/films/*/film.mp4
 
 # Cache
 cache/

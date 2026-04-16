@@ -32,7 +32,7 @@ func main() {
 	}
 	defer db.Close()
 
-	registry, err := video.NewRegistry("data/videos")
+	registry, err := video.NewRegistry("data/films")
 	if err != nil {
 		log.Printf("warning: video registry: %v", err)
 	}
@@ -42,7 +42,7 @@ func main() {
 	sessionStore := store.NewSessionStore(db)
 	rec := recorder.New(sessionStore)
 
-	if err := sessionStore.SeedCues("data/cues.json"); err != nil {
+	if err := sessionStore.SeedCuesFromDir("data/films"); err != nil {
 		log.Printf("warning: seed cues: %v", err)
 	}
 

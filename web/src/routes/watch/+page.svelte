@@ -33,6 +33,11 @@
 	let seeking = $state(false);
 	let backendDuration = $state(0);
 	let ttsProvider = $state<'browser' | 'sunset'>('browser');
+	let videoId = $state('');
+	let filmTitle = $state('');
+	let filmYear = $state(0);
+	let filmDirector = $state('');
+	let filmSynopsis = $state('');
 
 	// Chat state
 	let chatMessages = $state<ChatMessage[]>([]);
@@ -297,10 +302,48 @@
 					// Non-critical, defaults to browser
 				}
 
+				// Fetch film list + metadata first
+				try {
+					const videosRes = await fetch('/api/videos');
+					if (videosRes.ok) {
+						const videos = await videosRes.json();
+						if (videos.length > 0) {
+							const film = videos[0];
+							videoId = film.id;
+							backendDuration = film.duration || 0;
+							filmTitle = film.title || '';
+							filmYear = film.year || 0;
+							filmDirector = film.director || '';
+							filmSynopsis = film.synopsis || '';
+						}
+					}
+				} catch {
+					// Non-critical
+				}
+
+				if (!videoId) {
+					status = 'no films available';
+					return;
+				}
+
+				// Set video source now that we have the ID
+				if (videoEl) {
+					videoEl.src = `/api/videos/${videoId}/stream`;
+				}
+
+				// Inject synopsis as first chat message
+				if (filmSynopsis) {
+					const parts = [`**${filmTitle}**`];
+					if (filmYear) parts.push(`(${filmYear})`);
+					if (filmDirector) parts.push(`\u2014 Directed by ${filmDirector}`);
+					const introContent = parts.join(' ') + '\n\n' + filmSynopsis;
+					chatMessages = [{ role: 'assistant', content: introContent }];
+				}
+
 				const res = await fetch('/api/sessions', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ video_id: 'default' })
+					body: JSON.stringify({ video_id: videoId })
 				});
 				if (!res.ok) {
 					status = `session error: ${res.status}`;
@@ -312,20 +355,7 @@
 				trackerCleanup = createTracker(sessionId, videoEl);
 
 				try {
-					const videosRes = await fetch('/api/videos');
-					if (videosRes.ok) {
-						const videos = await videosRes.json();
-						const defaultVideo = videos.find((v: { id: string }) => v.id === 'default');
-						if (defaultVideo?.duration) {
-							backendDuration = defaultVideo.duration;
-						}
-					}
-				} catch {
-					// Non-critical
-				}
-
-				try {
-					const cueRes = await fetch('/api/videos/default/cues');
+					const cueRes = await fetch(`/api/videos/${videoId}/cues`);
 					if (cueRes.ok) {
 						cues = await cueRes.json();
 						if (cues.length > 0) {
@@ -385,7 +415,6 @@
 		<!-- svelte-ignore a11y_media_has_caption -->
 		<video
 			bind:this={videoEl}
-			src="/api/videos/default/stream"
 			onclick={togglePlay}
 			onplay={() => playing = true}
 			onpause={() => playing = false}
@@ -397,6 +426,20 @@
 		{#if status !== 'connected'}
 			<div class="status-overlay">
 				<p>{status}</p>
+			</div>
+		{/if}
+
+		{#if !playing && filmTitle && status === 'connected'}
+			<div class="synopsis-overlay">
+				<h2 class="synopsis-title">{filmTitle}</h2>
+				{#if filmYear || filmDirector}
+					<p class="synopsis-meta">
+						{#if filmYear}{filmYear}{/if}{#if filmYear && filmDirector} · {/if}{#if filmDirector}Directed by {filmDirector}{/if}
+					</p>
+				{/if}
+				{#if filmSynopsis}
+					<p class="synopsis-text">{filmSynopsis}</p>
+				{/if}
 			</div>
 		{/if}
 
@@ -596,6 +639,46 @@
 		color: #aaa;
 		font-family: system-ui, -apple-system, sans-serif;
 		font-size: 1.1rem;
+	}
+
+	.synopsis-overlay {
+		position: absolute;
+		bottom: 80px;
+		left: 0;
+		right: 0;
+		padding: 32px 48px;
+		background: linear-gradient(transparent, rgba(0, 0, 0, 0.85) 30%);
+		color: #fff;
+		font-family: system-ui, -apple-system, sans-serif;
+		max-width: 600px;
+		pointer-events: none;
+		animation: synopsisFadeIn 0.6s ease;
+	}
+
+	@keyframes synopsisFadeIn {
+		from { opacity: 0; transform: translateY(12px); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+
+	.synopsis-title {
+		font-size: 2rem;
+		font-weight: 700;
+		margin: 0 0 6px;
+		color: #e50914;
+		letter-spacing: -0.02em;
+	}
+
+	.synopsis-meta {
+		font-size: 0.9rem;
+		color: rgba(255, 255, 255, 0.6);
+		margin: 0 0 12px;
+	}
+
+	.synopsis-text {
+		font-size: 0.88rem;
+		line-height: 1.6;
+		color: rgba(255, 255, 255, 0.75);
+		margin: 0;
 	}
 
 	.controls {

@@ -1,6 +1,7 @@
 package video
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -18,37 +19,78 @@ type Video struct {
 	Height     int     `json:"height"`
 	BitrateBps int64   `json:"bitrate_bps"`
 	SizeBytes  int64   `json:"size_bytes"`
+	Title      string  `json:"title"`
+	Year       int     `json:"year,omitempty"`
+	Director   string  `json:"director,omitempty"`
+	Synopsis   string  `json:"synopsis,omitempty"`
+}
+
+type filmMetadata struct {
+	Title    string `json:"title"`
+	Year     int    `json:"year"`
+	Director string `json:"director"`
+	Synopsis string `json:"synopsis"`
 }
 
 type Registry struct {
 	videos map[string]Video
 }
 
+// NewRegistry scans subdirectories of dir, treating each as a film.
+// Each subdirectory should contain film.mp4 and optionally metadata.json.
 func NewRegistry(dir string) (*Registry, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read video dir %s: %w", dir, err)
+		return nil, fmt.Errorf("read films dir %s: %w", dir, err)
 	}
 
 	r := &Registry{videos: make(map[string]Video)}
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(strings.ToLower(e.Name()), ".mp4") {
+		if !e.IsDir() {
 			continue
 		}
 
-		path := filepath.Join(dir, e.Name())
-		v, err := probe(path)
-		if err != nil {
-			log.Printf("warning: skipping %s: %v", e.Name(), err)
+		id := e.Name()
+		mp4Path := filepath.Join(dir, id, "film.mp4")
+
+		if _, err := os.Stat(mp4Path); err != nil {
+			log.Printf("warning: skipping %s: no film.mp4 found", id)
 			continue
 		}
-		r.videos[v.ID] = v
+
+		v, err := probe(mp4Path)
+		if err != nil {
+			log.Printf("warning: skipping %s: %v", id, err)
+			continue
+		}
+		v.ID = id
+
+		// Load metadata.json if present
+		metaPath := filepath.Join(dir, id, "metadata.json")
+		if data, err := os.ReadFile(metaPath); err == nil {
+			var meta filmMetadata
+			if err := json.Unmarshal(data, &meta); err != nil {
+				log.Printf("warning: %s/metadata.json: %v", id, err)
+			} else {
+				v.Title = meta.Title
+				v.Year = meta.Year
+				v.Director = meta.Director
+				v.Synopsis = meta.Synopsis
+			}
+		}
+
+		// Default title to folder name if not set
+		if v.Title == "" {
+			v.Title = strings.ToUpper(id[:1]) + id[1:]
+		}
+
+		r.videos[id] = v
 	}
 
 	if len(r.videos) == 0 {
-		log.Printf("warning: no video files found in %s", dir)
+		log.Printf("warning: no films found in %s", dir)
 	} else {
-		log.Printf("loaded %d video(s) from %s", len(r.videos), dir)
+		log.Printf("loaded %d film(s) from %s", len(r.videos), dir)
 	}
 
 	return r, nil
@@ -106,11 +148,7 @@ func probe(path string) (Video, error) {
 		bitrate = int64(float64(info.Size()*8) / duration)
 	}
 
-	name := filepath.Base(path)
-	id := strings.TrimSuffix(name, filepath.Ext(name))
-
 	return Video{
-		ID:         id,
 		Path:       path,
 		Duration:   duration,
 		Width:      width,

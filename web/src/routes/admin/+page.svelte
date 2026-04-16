@@ -186,7 +186,7 @@
 				const now = Date.now();
 				const newSession: SessionWithStats = {
 					id: sessionId,
-					video_id: payload.video_id || 'default',
+					video_id: payload.video_id || 'heat',
 					user_agent: payload.user_agent || '',
 					created_at: now,
 					last_seen_at: now,

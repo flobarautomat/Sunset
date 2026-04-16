@@ -6,11 +6,15 @@ Significant choices made during implementation and the reasoning behind them.
 
 ### Backend-served video with range requests
 
-Videos live in `data/videos/` and are served by the Go backend via `http.ServeContent`, not from SvelteKit's `static/` directory. This matches how production works — video delivery goes through the backend where you can add auth, access logging, and CDN origin behavior. `http.ServeContent` handles `Range` headers (HTTP 206 Partial Content) which browsers need for seeking in `<video>` elements, plus `If-Modified-Since` and correct `Content-Type` for free. The viewer discovers available videos via `GET /api/videos` rather than hardcoding paths.
+Videos live in `data/films/{id}/` and are served by the Go backend via `http.ServeContent`, not from SvelteKit's `static/` directory. This matches how production works — video delivery goes through the backend where you can add auth, access logging, and CDN origin behavior. `http.ServeContent` handles `Range` headers (HTTP 206 Partial Content) which browsers need for seeking in `<video>` elements, plus `If-Modified-Since` and correct `Content-Type` for free. The viewer discovers available videos via `GET /api/videos` rather than hardcoding paths.
 
 ### Real video asset, not a toy clip
 
 Using a full-length ~2GB movie file instead of a 30-second freely-licensed clip. This exercises realistic conditions: range requests across a large file, seeking behavior, buffering, and the kind of I/O the backend would actually handle in production. The backend serves it from disk via `http.ServeContent` — this is the production serving path, not a demo shortcut. The file is gitignored because large binaries don't belong in version control; the README tells the reviewer where to download it and where to place it.
+
+### Per-film directory structure over flat layout
+
+Each film is a self-contained directory under `data/films/`: the video file (`film.mp4`), cue definitions (`cues.json`), and metadata (`metadata.json`) live together. The folder name IS the video ID — `data/films/heat/` means video ID `heat`. Adding a new film is "create a folder, drop files in it" — no code changes, no schema migrations, no database inserts. Film metadata (title, year, director, synopsis) lives in a JSON file rather than in SQLite because it's static content that changes with the film, not with user activity. Keeping it as a file means it's version-controllable, human-editable, and doesn't require database tools to inspect or update. The synopsis is surfaced to the viewer as a pre-play overlay and the first chat message, giving context before the film starts.
 
 ### MP4 metadata extraction via `alfg/mp4`
 
@@ -47,11 +51,11 @@ The coding challenge provides a TTS endpoint at `staging.api.sunset.video/api/v1
 
 ### Static narration cues over LLM-generated lines
 
-Cue prompts contain the final narration text directly rather than being sent to an LLM to generate a spoken line. This keeps cue playback deterministic (same text every time), avoids an extra API call and its latency, and makes cues editable by non-technical users who can just edit `data/cues.json`. The trade-off is less dynamic/contextual narration, but for preset scene descriptions this is the right call.
+Cue prompts contain the final narration text directly rather than being sent to an LLM to generate a spoken line. This keeps cue playback deterministic (same text every time), avoids an extra API call and its latency, and makes cues editable by non-technical users who can just edit the film's `cues.json`. The trade-off is less dynamic/contextual narration, but for preset scene descriptions this is the right call.
 
 ### Cue seeding via JSON with upsert
 
-Voice cues are defined in `data/cues.json` and seeded into the `cues` table on server startup via `INSERT OR REPLACE` keyed on `(video_id, at_seconds)`. This means editing the JSON file and restarting the server updates cues without a code change — satisfying the bonus requirement ("configurable without a code change"). The upsert approach was chosen over skip-if-present because it lets you iterate on cue text without wiping the database.
+Voice cues are defined in each film's `cues.json` (e.g. `data/films/heat/cues.json`) and seeded into the `cues` table on server startup via `INSERT OR REPLACE` keyed on `(video_id, at_seconds)`. The `video_id` is auto-set from the folder name. This means editing the JSON file and restarting the server updates cues without a code change — satisfying the bonus requirement ("configurable without a code change"). The upsert approach was chosen over skip-if-present because it lets you iterate on cue text without wiping the database.
 
 ### Chat responses spoken aloud via TTS
 

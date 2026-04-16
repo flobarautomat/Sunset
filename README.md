@@ -23,12 +23,12 @@ cd web && npm install && cd ..
 The demo uses a real video file (~2GB) that's too large for git. It is the movie Heat by Michael Mann, released in 1995. Download it and place it in the expected location:
 
 1. Download from: **[Google Drive](https://drive.google.com/file/d/1nEugaQe9h2ZUtQbnQNC_Nwtg1NHL3CKc/view?usp=drive_link)**
-2. Save to: `data/videos/default.mp4`
+2. Save to: `data/films/heat/film.mp4`
 
 ```bash
-mkdir -p data/videos
+mkdir -p data/films/heat
 # move or copy your downloaded file:
-mv ~/Downloads/Heat.mp4 data/videos/default.mp4
+mv ~/Downloads/Heat.mp4 data/films/heat/film.mp4
 ```
 
 ### Configure environment
@@ -80,6 +80,8 @@ This starts the Go backend on `:8080` and the SvelteKit dev server on `:5173`.
 
 A single Go binary serves the REST API, WebSocket hub, and proxies all AI calls — the API key never touches the browser. SvelteKit ships two routes (`/watch` and `/admin`) from one app. SQLite via `modernc.org/sqlite` (pure Go, no CGO) stores sessions, events, and cue configurations.
 
+Each film is a self-contained directory under `data/films/` — the video file, cue definitions, and metadata (title, synopsis, director, year) live together. The folder name is the video ID. Adding a new film means creating a folder and dropping files in it — no code changes, no schema migrations.
+
 ### The Viewer
 
 A Netflix-style full-viewport video player with custom controls, an auto-hiding overlay, and cue markers on the seek bar. A resizable bottom-drawer chat panel lets the user ask questions about the current scene — responses stream in via SSE with markdown rendering. Five voice cues narrate at key moments during the film, appearing in the chat log with per-bubble play/pause controls. The whole thing is dark-themed and keyboard-navigable.
@@ -112,7 +114,7 @@ These are the five choices I'd most want to talk through with a reviewer. The fu
 
 ## What I'd Do Next
 
-- **Cue authoring interface.** The current cues are preset in `data/cues.json` and seeded on startup — they work, but they're not well-matched to every moment in the film. I'd add a cue editor in the admin dashboard (or a dedicated authoring tool) where you can scrub through the video, drop pins at timestamps, write narration text, and preview TTS — all without touching code or restarting the server.
+- **Cue authoring interface.** The current cues are preset in each film's `cues.json` and seeded on startup — they work, but they're not well-matched to every moment in the film. I'd add a cue editor in the admin dashboard (or a dedicated authoring tool) where you can scrub through the video, drop pins at timestamps, write narration text, and preview TTS — all without touching code or restarting the server.
 - **Auth and access control.** No auth was a deliberate cut per the challenge constraints, but the admin dashboard and API endpoints would need it in production. Token-based auth for the API, session cookies for the viewer, role-based access for admin routes.
 - **Horizontal scale via Redis pub/sub.** The in-process hub works for single-box, but multiple server instances need a shared event bus. Redis pub/sub is the natural next step — the `Hub` interface wouldn't change, just the implementation behind it.
 - **Replay viewer.** The event log has everything needed to reconstruct a viewing session. A replay mode that scrubs through events alongside the video — showing when the user paused, what they asked the AI, which cues fired — would be a compelling demo of why the append-only log matters.
