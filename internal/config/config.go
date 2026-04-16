@@ -10,6 +10,8 @@ type Config struct {
 	SunsetAPIKey string
 	SunsetAPIURL string
 	AIModel      string
+	AIProvider   string // "sunset" or "anthropic"
+	AnthropicKey string
 }
 
 func Load() (*Config, error) {
@@ -32,6 +34,8 @@ func LoadOrDefault() *Config {
 		SunsetAPIKey: os.Getenv("SUNSET_API_KEY"),
 		SunsetAPIURL: envOr("SUNSET_API_URL", "https://staging.api.sunset.video"),
 		AIModel:      envOr("AI_MODEL", "anthropic/claude-haiku-4-5-20251001"),
+		AIProvider:   envOr("AI_PROVIDER", "sunset"),
+		AnthropicKey: os.Getenv("ANTHROPIC_API_KEY"),
 	}
 }
 

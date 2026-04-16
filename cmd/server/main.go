@@ -36,7 +36,12 @@ func main() {
 	sessionStore := store.NewSessionStore(db)
 	rec := recorder.New(sessionStore)
 
-	aiClient := ai.NewClient(cfg.SunsetAPIURL, cfg.SunsetAPIKey, cfg.AIModel)
+	// Pick AI provider credentials
+	aiKey := cfg.SunsetAPIKey
+	if cfg.AIProvider == "anthropic" {
+		aiKey = cfg.AnthropicKey
+	}
+	aiClient := ai.NewClient(cfg.AIProvider, cfg.SunsetAPIURL, aiKey, cfg.AIModel)
 
 	videosHandler := &api.VideosHandler{Registry: registry}
 	sessionsHandler := &api.SessionsHandler{Recorder: rec}
