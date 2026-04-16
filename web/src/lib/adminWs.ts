@@ -16,8 +16,33 @@ export interface EventWithSession {
 	payload?: any;
 }
 
+export interface FilmCue {
+	id: number;
+	at_seconds: number;
+	prompt: string;
+	voice_id?: string;
+}
+
+export interface FilmStatsWithMeta {
+	id: string;
+	title: string;
+	year?: number;
+	director?: string;
+	synopsis?: string;
+	duration: number;
+	width: number;
+	height: number;
+	session_count: number;
+	active_sessions: number;
+	play_count: number;
+	chat_messages: number;
+	ai_responses: number;
+	cues_triggered: number;
+	cues: FilmCue[];
+}
+
 export interface AdminCallbacks {
-	onSnapshot: (sessions: SessionWithStats[], events: EventWithSession[]) => void;
+	onSnapshot: (sessions: SessionWithStats[], events: EventWithSession[], filmStats: FilmStatsWithMeta[]) => void;
 	onSessionCreated: (sessionId: string, payload: any) => void;
 	onEventsRecorded: (sessionId: string, events: any[]) => void;
 	onSessionIdle: (sessionId: string) => void;
@@ -46,7 +71,7 @@ export function createAdminWs(callbacks: AdminCallbacks): () => void {
 				const msg = JSON.parse(event.data);
 				switch (msg.type) {
 					case 'snapshot':
-						callbacks.onSnapshot(msg.sessions || [], msg.events || []);
+						callbacks.onSnapshot(msg.sessions || [], msg.events || [], msg.film_stats || []);
 						break;
 					case 'session_created':
 						// payload is already parsed by top-level JSON.parse (json.RawMessage embeds inline)

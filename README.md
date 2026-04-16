@@ -88,7 +88,7 @@ A Netflix-style full-viewport video player with custom controls, an auto-hiding 
 
 ### The Dashboard
 
-A real-time admin view with two panels: a terminal-style live event feed at the top (newest-first, monospace, color-coded by event type) and a session list at the bottom with live/idle/disconnected status indicators. Everything updates over WebSocket — no polling. An in-process pub/sub hub fans out events from the API handlers to all connected dashboard clients. Click a session to expand its full event timeline inline.
+A real-time admin console with a sidebar navigation and three widgets (more coming). A **live event feed** shows every viewer interaction as a terminal-style stream — newest-first, monospace, color-coded by event type. A **sessions list** tracks every viewer with live/idle/disconnected status indicators; click to expand the full event timeline inline. A **films widget** shows per-film metadata (title, year, director, synopsis, runtime, resolution), aggregate stats (sessions, plays, chat messages, AI responses, cues triggered), and the full cue list with timestamps. Everything updates over WebSocket — no polling. An in-process pub/sub hub fans out events from the API handlers to all connected dashboard clients. Film stats increment live as viewers interact.
 
 ### Session Tracking
 
@@ -108,7 +108,7 @@ These are the five choices I'd most want to talk through with a reviewer. The fu
 
 3. **Custom video player instead of native controls.** Native `<video controls>` can't render cue markers on the seek bar or maintain a consistent dark aesthetic. Building custom controls turned the seek bar into a data visualization surface — cue positions today, potentially a watch-progress heatmap later. The trade-off is more frontend code, but the UX payoff is significant.
 
-4. **WebSocket fan-out from in-process pub/sub.** The dashboard gets real-time updates via a simple Go channel-based hub — no Redis, no external broker. API handlers publish after committing to SQLite; the WebSocket bridge subscribes and forwards. This is the right complexity for a single-box demo, and I'd call out Redis pub/sub as the first thing to add for horizontal scale.
+4. **WebSocket fan-out from in-process pub/sub.** The dashboard gets real-time updates via a simple Go channel-based hub — no Redis, no external broker. API handlers publish after committing to SQLite; the WebSocket bridge subscribes and forwards. The snapshot-on-connect includes sessions, events, and per-film aggregate stats so the dashboard has full state immediately. This is the right complexity for a single-box demo, and I'd call out Redis pub/sub as the first thing to add for horizontal scale.
 
 5. **Provider abstractions that unblocked development.** When the Sunset API key didn't work for TTS and had quirks in streaming chat, I built switchable providers for both rather than stubbing or blocking. The browser speech fallback means the app works immediately with zero configuration, while the Sunset paths are production-ready for when the key works. This is the kind of pragmatic decision I'd make in a real codebase — build the abstraction that solves today's problem and tomorrow's.
 

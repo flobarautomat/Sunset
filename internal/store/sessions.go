@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"moonrise/internal/recorder"
 )
@@ -125,6 +126,53 @@ func (s *SessionStore) ListCues(videoID string) ([]Cue, error) {
 	}
 	return cues, rows.Err()
 }
+
+// FilmStats holds aggregate event counts per video for the admin dashboard.
+type FilmStats struct {
+	VideoID        string `json:"video_id"`
+	SessionCount   int    `json:"session_count"`
+	ActiveSessions int    `json:"active_sessions"`
+	PlayCount      int    `json:"play_count"`
+	ChatMessages   int    `json:"chat_messages"`
+	AIResponses    int    `json:"ai_responses"`
+	CuesTriggered  int    `json:"cues_triggered"`
+}
+
+// ListFilmStats returns aggregate stats per video_id across all sessions.
+func (s *SessionStore) ListFilmStats() ([]FilmStats, error) {
+	now := fmt.Sprintf("%d", nowMilli()-30000)
+	rows, err := s.db.Query(`
+		SELECT s.video_id,
+			COUNT(DISTINCT s.id) AS session_count,
+			COUNT(DISTINCT CASE WHEN s.last_seen_at > `+now+` THEN s.id END) AS active_sessions,
+			SUM(CASE WHEN e.kind='video_play' THEN 1 ELSE 0 END) AS play_count,
+			SUM(CASE WHEN e.kind='ai_message' THEN 1 ELSE 0 END) AS chat_messages,
+			SUM(CASE WHEN e.kind='ai_response' THEN 1 ELSE 0 END) AS ai_responses,
+			SUM(CASE WHEN e.kind='cue_played' THEN 1 ELSE 0 END) AS cues_triggered
+		FROM sessions s
+		LEFT JOIN events e ON e.session_id = s.id
+		GROUP BY s.video_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FilmStats
+	for rows.Next() {
+		var fs FilmStats
+		if err := rows.Scan(&fs.VideoID, &fs.SessionCount, &fs.ActiveSessions, &fs.PlayCount, &fs.ChatMessages, &fs.AIResponses, &fs.CuesTriggered); err != nil {
+			return nil, err
+		}
+		out = append(out, fs)
+	}
+	return out, rows.Err()
+}
+
+func nowMilli() int64 {
+	return timeNow().UnixMilli()
+}
+
+var timeNow = func() time.Time { return time.Now() }
 
 // SessionWithStats is a session with aggregate event information for the dashboard.
 type SessionWithStats struct {

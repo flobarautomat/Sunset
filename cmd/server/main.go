@@ -64,8 +64,8 @@ func main() {
 	cuesHandler := &api.CuesHandler{Store: sessionStore, TTS: ttsProvider}
 	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec, Hub: hub}
 	ttsHandler := &api.TTSHandler{TTS: ttsProvider}
-	adminHandler := &api.AdminHandler{Store: sessionStore}
-	wsHandler := &ws.Handler{Hub: hub, Store: sessionStore}
+	adminHandler := &api.AdminHandler{Store: sessionStore, Registry: registry}
+	wsHandler := &ws.Handler{Hub: hub, Store: sessionStore, Registry: registry}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -90,6 +90,7 @@ func main() {
 		r.Post("/tts", ttsHandler.Speak)
 		r.Get("/admin/sessions", adminHandler.ListSessions)
 		r.Get("/admin/sessions/{id}", adminHandler.GetSession)
+		r.Get("/admin/films", adminHandler.ListFilms)
 
 		r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

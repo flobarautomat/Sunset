@@ -5,12 +5,14 @@ import (
 	"net/http"
 
 	"moonrise/internal/store"
+	"moonrise/internal/video"
 
 	"github.com/go-chi/chi/v5"
 )
 
 type AdminHandler struct {
-	Store *store.SessionStore
+	Store    *store.SessionStore
+	Registry *video.Registry
 }
 
 type sessionDetailResponse struct {
@@ -71,4 +73,50 @@ func (h *AdminHandler) GetSession(w http.ResponseWriter, r *http.Request) {
 		Session: *found,
 		Events:  eventsWithSession,
 	})
+}
+
+type filmResponse struct {
+	video.Video
+	SessionCount   int          `json:"session_count"`
+	ActiveSessions int          `json:"active_sessions"`
+	PlayCount      int          `json:"play_count"`
+	ChatMessages   int          `json:"chat_messages"`
+	AIResponses    int          `json:"ai_responses"`
+	CuesTriggered  int          `json:"cues_triggered"`
+	Cues           []store.Cue  `json:"cues"`
+}
+
+func (h *AdminHandler) ListFilms(w http.ResponseWriter, r *http.Request) {
+	// Build stats map
+	statsMap := make(map[string]store.FilmStats)
+	if stats, err := h.Store.ListFilmStats(); err == nil {
+		for _, s := range stats {
+			statsMap[s.VideoID] = s
+		}
+	}
+
+	var films []filmResponse
+	for _, v := range h.Registry.List() {
+		fs := statsMap[v.ID]
+		cues, _ := h.Store.ListCues(v.ID)
+		if cues == nil {
+			cues = []store.Cue{}
+		}
+		films = append(films, filmResponse{
+			Video:          v,
+			SessionCount:   fs.SessionCount,
+			ActiveSessions: fs.ActiveSessions,
+			PlayCount:      fs.PlayCount,
+			ChatMessages:   fs.ChatMessages,
+			AIResponses:    fs.AIResponses,
+			CuesTriggered:  fs.CuesTriggered,
+			Cues:           cues,
+		})
+	}
+	if films == nil {
+		films = []filmResponse{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(films)
 }

@@ -41,6 +41,14 @@ The Sunset staging API key was returning 401 during development. Rather than blo
 
 Assistant messages are rendered as markdown via `snarkdown` (1KB, zero-dependency parser). User messages stay as plain text. This lets the AI use bold, lists, code blocks, and links naturally — which it does by default — without the output looking like raw markup. Chose snarkdown over heavier parsers (marked, markdown-it) because the chat context doesn't need footnotes, tables, or GFM extensions.
 
+### Sidebar navigation over tabs or stacked panels
+
+The admin dashboard uses a persistent sidebar (~200px) instead of bottom tabs or stacked panels. With three widgets (and more planned), a sidebar scales naturally — adding a new view is adding a sidebar item, not rethinking layout. The stacked layout worked for two panels but broke down when films needed its own full-height view. The sidebar also gives a natural home for connection status and a link back to the viewer. Active item gets a red left-border accent and white text; inactive items are muted. The sidebar-plus-main-content pattern matches what admins expect from tools like Grafana, Vercel, or Linear.
+
+### Film stats via snapshot + local increment
+
+Film metadata and aggregate stats (sessions, plays, chat messages, AI responses, cues triggered) are included in the WebSocket snapshot on connect. Rather than polling or sending a new message type on every event, the frontend locally increments the relevant film's counters when `events_recorded` or `session_created` messages arrive. This keeps the dashboard feeling live without adding bandwidth — the snapshot is the source of truth, and local increments are a UI optimization that gets corrected on reconnect.
+
 ### Resizable chat panel over modal or sidebar
 
 The chat panel is a bottom drawer that starts at 1/3 viewport height and is drag-resizable. The video shrinks to fill remaining space above. This keeps the video always visible (unlike a modal) and uses horizontal space better than a sidebar (video aspect ratio is landscape). When collapsed, only the prompt input bar shows — always accessible without expanding the full chat history.

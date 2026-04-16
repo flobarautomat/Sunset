@@ -9,20 +9,41 @@ import (
 
 	"moonrise/internal/pubsub"
 	"moonrise/internal/store"
+	"moonrise/internal/video"
 
 	"nhooyr.io/websocket"
 	"nhooyr.io/websocket/wsjson"
 )
 
 type Handler struct {
-	Hub   *pubsub.Hub
-	Store *store.SessionStore
+	Hub      *pubsub.Hub
+	Store    *store.SessionStore
+	Registry *video.Registry
+}
+
+type filmStatsWithMeta struct {
+	ID             string      `json:"id"`
+	Title          string      `json:"title"`
+	Year           int         `json:"year,omitempty"`
+	Director       string      `json:"director,omitempty"`
+	Synopsis       string      `json:"synopsis,omitempty"`
+	Duration       float64     `json:"duration"`
+	Width          int         `json:"width"`
+	Height         int         `json:"height"`
+	SessionCount   int         `json:"session_count"`
+	ActiveSessions int         `json:"active_sessions"`
+	PlayCount      int         `json:"play_count"`
+	ChatMessages   int         `json:"chat_messages"`
+	AIResponses    int         `json:"ai_responses"`
+	CuesTriggered  int         `json:"cues_triggered"`
+	Cues           []store.Cue `json:"cues"`
 }
 
 type snapshotMessage struct {
-	Type     string                   `json:"type"`
-	Sessions []store.SessionWithStats `json:"sessions"`
-	Events   []store.EventWithSession `json:"events"`
+	Type      string                   `json:"type"`
+	Sessions  []store.SessionWithStats `json:"sessions"`
+	Events    []store.EventWithSession `json:"events"`
+	FilmStats []filmStatsWithMeta      `json:"film_stats"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -106,9 +127,52 @@ func (h *Handler) sendSnapshot(ctx context.Context, conn *websocket.Conn) error 
 		events[i], events[j] = events[j], events[i]
 	}
 
+	// Build film stats
+	filmStats := h.buildFilmStats()
+
 	return wsjson.Write(ctx, conn, snapshotMessage{
-		Type:     "snapshot",
-		Sessions: sessions,
-		Events:   events,
+		Type:      "snapshot",
+		Sessions:  sessions,
+		Events:    events,
+		FilmStats: filmStats,
 	})
+}
+
+func (h *Handler) buildFilmStats() []filmStatsWithMeta {
+	statsMap := make(map[string]store.FilmStats)
+	if stats, err := h.Store.ListFilmStats(); err == nil {
+		for _, s := range stats {
+			statsMap[s.VideoID] = s
+		}
+	}
+
+	var out []filmStatsWithMeta
+	for _, v := range h.Registry.List() {
+		fs := statsMap[v.ID]
+		cues, _ := h.Store.ListCues(v.ID)
+		if cues == nil {
+			cues = []store.Cue{}
+		}
+		out = append(out, filmStatsWithMeta{
+			ID:             v.ID,
+			Title:          v.Title,
+			Year:           v.Year,
+			Director:       v.Director,
+			Synopsis:       v.Synopsis,
+			Duration:       v.Duration,
+			Width:          v.Width,
+			Height:         v.Height,
+			SessionCount:   fs.SessionCount,
+			ActiveSessions: fs.ActiveSessions,
+			PlayCount:      fs.PlayCount,
+			ChatMessages:   fs.ChatMessages,
+			AIResponses:    fs.AIResponses,
+			CuesTriggered:  fs.CuesTriggered,
+			Cues:           cues,
+		})
+	}
+	if out == nil {
+		out = []filmStatsWithMeta{}
+	}
+	return out
 }
