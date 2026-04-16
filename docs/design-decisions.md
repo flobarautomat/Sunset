@@ -28,6 +28,10 @@ The admin dashboard displays full AI chat content, not just metadata. For a demo
 
 Videos live in `data/videos/` and are served by the Go backend via `http.ServeContent`, not from SvelteKit's `static/` directory. This matches how production works — video delivery goes through the backend where you can add auth, access logging, and CDN origin behavior. `http.ServeContent` handles `Range` headers (HTTP 206 Partial Content) which browsers need for seeking in `<video>` elements, plus `If-Modified-Since` and correct `Content-Type` for free. The viewer discovers available videos via `GET /api/videos` rather than hardcoding paths.
 
+### Real video asset, not a toy clip
+
+Using a full-length ~2GB movie file instead of a 30-second freely-licensed clip. This exercises realistic conditions: range requests across a large file, seeking behavior, buffering, and the kind of I/O the backend would actually handle in production. The backend serves it from disk via `http.ServeContent` — this is the production serving path, not a demo shortcut. The file is gitignored because large binaries don't belong in version control; the README tells the reviewer where to download it and where to place it.
+
 ### CORS as a simple middleware
 
 A minimal CORS handler that allows all origins. Fine for local dev and a demo — no need for a CORS library. Would tighten `Access-Control-Allow-Origin` to specific domains in production.
