@@ -43,3 +43,7 @@ The recorder owns both session creation and event recording behind an `EventStor
 ### CORS as a simple middleware
 
 A minimal CORS handler that allows all origins. Fine for local dev and a demo — no need for a CORS library. Would tighten `Access-Control-Allow-Origin` to specific domains in production.
+
+### Custom video player over native controls
+
+Native `<video controls>` can't render cue markers on the seek bar or provide a consistent dark UI. Building custom controls turns the seek bar into a data visualization surface — cue positions now, potentially a watch-progress heatmap later. The trade-off is more frontend code and losing built-in accessibility, mitigated by keeping keyboard shortcuts (space for play/pause) and using semantic HTML where possible. Full-viewport layout (not the Fullscreen API) with auto-hiding controls matches the Netflix pattern without requiring OS-level fullscreen permission.

@@ -85,6 +85,37 @@ func (s *SessionStore) ListSessions() ([]recorder.Session, error) {
 	return sessions, rows.Err()
 }
 
+// Cue represents a voice cue configured for a video.
+type Cue struct {
+	ID        int     `json:"id"`
+	VideoID   string  `json:"video_id"`
+	AtSeconds float64 `json:"at_seconds"`
+	Prompt    string  `json:"prompt"`
+	VoiceID   string  `json:"voice_id"`
+}
+
+// ListCues returns enabled cues for a video ordered by time.
+func (s *SessionStore) ListCues(videoID string) ([]Cue, error) {
+	rows, err := s.db.Query(
+		`SELECT id, video_id, at_seconds, prompt, voice_id FROM cues WHERE video_id = ? AND enabled = 1 ORDER BY at_seconds`,
+		videoID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var cues []Cue
+	for rows.Next() {
+		var c Cue
+		if err := rows.Scan(&c.ID, &c.VideoID, &c.AtSeconds, &c.Prompt, &c.VoiceID); err != nil {
+			return nil, err
+		}
+		cues = append(cues, c)
+	}
+	return cues, rows.Err()
+}
+
 // ListEvents returns all events for a session ordered by time.
 func (s *SessionStore) ListEvents(sessionID string) ([]recorder.Event, error) {
 	rows, err := s.db.Query(`SELECT kind, at, video_pos, payload FROM events WHERE session_id = ? ORDER BY at`, sessionID)

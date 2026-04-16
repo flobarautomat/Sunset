@@ -99,11 +99,14 @@ All video serving is server-side. Videos live in `data/videos/` and are served v
 
 ## 6. Viewer app (`/watch`)
 
-- `<video>` element with `src="/api/videos/default/stream"` — video is served from the Go backend, not SvelteKit static.
-- On mount: `POST /api/sessions` → stash `session_id` in memory.
-- Attach listeners for `play`, `pause`, `seeking`, `ended`, `timeupdate` — push events in batches (every ~2s or on state change) to `/events`. Heartbeat every 10s.
-- **Cue scheduler (client-side):** fetch `/cues` once, track `currentTime`, trigger cue when `prev < at <= now`. Trigger = request `/cue-audio?cue_id` and play it via `<audio>`, log a `cue_played` event.
-- **Chat:** text input + message list. On submit → fetch `/api/chat` with SSE, render tokens as they arrive.
+- **Netflix-style custom player** — full-viewport (`100vw × 100vh`), dark background, video fills via `object-fit: contain`. No native browser controls.
+- **Custom controls overlay** — play/pause, mute toggle, seek bar, time display. Auto-hides after 3s of mouse inactivity, cursor hides too.
+- **Seek bar with cue markers** — custom seek bar with Netflix-red progress track. Cue positions rendered as yellow dots at `(at_seconds / duration) * 100%`. Hover shows prompt tooltip, click seeks to cue time.
+- **Prompt input** — always-visible text input at bottom of viewport for AI chat (wired in Phase 3).
+- On mount: `POST /api/sessions` → stash `session_id`, fetch `GET /api/videos/default/cues` → render cue markers.
+- Tracker (`$lib/tracker.ts`) attaches to the underlying `<video>` element — custom controls don't interfere.
+- **Cue scheduler (client-side, Phase 4):** track `currentTime`, trigger cue when `prev < at <= now`. Trigger = request `/cue-audio?cue_id` and play via `<audio>`, log a `cue_played` event.
+- **Chat (Phase 3):** prompt input submits to `/api/chat` with SSE, renders streamed tokens.
 
 ## 7. Dashboard (`/admin`)
 
@@ -243,6 +246,28 @@ _Goal: a user watches a video, and every play/pause/seek lands in SQLite. Tests 
 - Time-based batching (2s interval) — simple and predictable
 
 **Verified:** `go test ./internal/recorder/... -v` → 6/6 pass, `go build ./...` clean
+
+---
+
+### Phase 2.5 — Netflix-style video player + cue markers ✅
+
+_Goal: replace the bare `<video>` with an immersive full-viewport player with custom controls, cue markers on the seek bar, and a prompt input stub._
+
+**Status: COMPLETE**
+
+**What was built:**
+- `web/src/routes/watch/+page.svelte` — complete rewrite. Full-viewport dark player (`100vw × 100vh`), custom controls overlay (play/pause, mute toggle, seek bar, time display) that auto-hides after 3s. Netflix-red seek bar with draggable seeking. Click-to-toggle-play on video, space bar shortcut. Cue markers as yellow dots on the seek bar — hover shows prompt tooltip, click seeks to timestamp.
+- `internal/api/cues.go` — `GET /api/videos/{id}/cues` handler returning enabled cues as JSON.
+- `internal/store/sessions.go` — added `Cue` type and `ListCues(videoID)` method.
+- `cmd/server/main.go` — wired cues handler and route.
+- Prompt input bar at bottom of viewport — always visible, stub for Phase 3 chat wiring.
+
+**Key decisions (see `docs/design-decisions.md`):**
+- Custom player over native controls — native seek bar can't render cue markers
+- Full-viewport layout, not Fullscreen API — matches Netflix pattern without OS permission
+- Mute toggle instead of volume slider — keeps controls minimal
+
+**Verified:** `go build ./...` clean, `svelte-check` passes, `vite build` clean
 
 ---
 

@@ -37,6 +37,7 @@ func main() {
 
 	videosHandler := &api.VideosHandler{Registry: registry}
 	sessionsHandler := &api.SessionsHandler{Recorder: rec}
+	cuesHandler := &api.CuesHandler{Store: sessionStore}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -50,6 +51,7 @@ func main() {
 
 		r.Get("/videos", videosHandler.List)
 		r.Get("/videos/{id}/stream", videosHandler.Stream)
+		r.Get("/videos/{id}/cues", cuesHandler.List)
 
 		r.Post("/sessions", sessionsHandler.Create)
 		r.Post("/sessions/{id}/events", sessionsHandler.RecordEvents)
