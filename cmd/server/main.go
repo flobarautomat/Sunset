@@ -24,6 +24,7 @@ import (
 )
 
 func main() {
+	startTime := time.Now()
 	cfg := config.LoadOrDefault()
 
 	db, err := store.Open("moonrise.db")
@@ -64,8 +65,8 @@ func main() {
 	cuesHandler := &api.CuesHandler{Store: sessionStore, TTS: ttsProvider}
 	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec, Hub: hub}
 	ttsHandler := &api.TTSHandler{TTS: ttsProvider}
-	adminHandler := &api.AdminHandler{Store: sessionStore, Registry: registry}
-	wsHandler := &ws.Handler{Hub: hub, Store: sessionStore, Registry: registry}
+	adminHandler := &api.AdminHandler{Store: sessionStore, Registry: registry, Hub: hub, StartTime: startTime}
+	wsHandler := &ws.Handler{Hub: hub, Store: sessionStore, Registry: registry, StartTime: startTime}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -91,6 +92,8 @@ func main() {
 		r.Get("/admin/sessions", adminHandler.ListSessions)
 		r.Get("/admin/sessions/{id}", adminHandler.GetSession)
 		r.Get("/admin/films", adminHandler.ListFilms)
+		r.Get("/admin/stats", adminHandler.GetStats)
+		r.Get("/admin/heatmap", adminHandler.GetHeatmap)
 
 		r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

@@ -217,6 +217,98 @@ func (s *SessionStore) GetSession(id string) (*recorder.Session, error) {
 	return &sess, nil
 }
 
+// SystemStats holds aggregate counts for the system health widget.
+type SystemStats struct {
+	TotalSessions  int `json:"total_sessions"`
+	ActiveSessions int `json:"active_sessions"`
+	TotalEvents    int `json:"total_events"`
+}
+
+// GetSystemStats returns system-wide aggregate counts.
+func (s *SessionStore) GetSystemStats() (SystemStats, error) {
+	threshold := fmt.Sprintf("%d", nowMilli()-30000)
+	var ss SystemStats
+	err := s.db.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM sessions) AS total_sessions,
+			(SELECT COUNT(*) FROM sessions WHERE last_seen_at > `+threshold+`) AS active_sessions,
+			(SELECT COUNT(*) FROM events) AS total_events
+	`).Scan(&ss.TotalSessions, &ss.ActiveSessions, &ss.TotalEvents)
+	return ss, err
+}
+
+// AIStats holds aggregate AI usage metrics.
+type AIStats struct {
+	TotalMessages  int     `json:"total_messages"`
+	TotalResponses int     `json:"total_responses"`
+	AvgResponseLen float64 `json:"avg_response_length"`
+	TotalCuePlays  int     `json:"total_cue_plays"`
+}
+
+// GetAIStats returns aggregate AI chat and cue metrics.
+func (s *SessionStore) GetAIStats() (AIStats, error) {
+	var as AIStats
+	var avgLen *float64
+	err := s.db.QueryRow(`
+		SELECT
+			SUM(CASE WHEN kind = 'ai_message' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN kind = 'ai_response' THEN 1 ELSE 0 END),
+			AVG(CASE WHEN kind = 'ai_response' THEN LENGTH(JSON_EXTRACT(payload, '$.text')) END),
+			SUM(CASE WHEN kind = 'cue_played' THEN 1 ELSE 0 END)
+		FROM events
+	`).Scan(&as.TotalMessages, &as.TotalResponses, &avgLen, &as.TotalCuePlays)
+	if avgLen != nil {
+		as.AvgResponseLen = *avgLen
+	}
+	return as, err
+}
+
+// HeatmapBucket holds event counts for a time range in the video.
+type HeatmapBucket struct {
+	BucketStart float64 `json:"bucket_start"`
+	BucketEnd   float64 `json:"bucket_end"`
+	PlayCount   int     `json:"play_count"`
+	PauseCount  int     `json:"pause_count"`
+	SeekCount   int     `json:"seek_count"`
+	ChatCount   int     `json:"chat_count"`
+	CueCount    int     `json:"cue_count"`
+	Total       int     `json:"total"`
+}
+
+// GetHeatmap returns event density bucketed by video position.
+func (s *SessionStore) GetHeatmap(videoID string, bucketSeconds float64) ([]HeatmapBucket, error) {
+	rows, err := s.db.Query(`
+		SELECT
+			CAST(CAST(e.video_pos / ? AS INTEGER) * ? AS REAL) AS bucket_start,
+			CAST(CAST(e.video_pos / ? AS INTEGER) * ? + ? AS REAL) AS bucket_end,
+			SUM(CASE WHEN e.kind = 'video_play' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN e.kind = 'video_pause' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN e.kind = 'video_seek' THEN 1 ELSE 0 END),
+			SUM(CASE WHEN e.kind IN ('ai_message', 'ai_response') THEN 1 ELSE 0 END),
+			SUM(CASE WHEN e.kind = 'cue_played' THEN 1 ELSE 0 END),
+			COUNT(*)
+		FROM events e
+		JOIN sessions s ON e.session_id = s.id
+		WHERE s.video_id = ? AND e.video_pos IS NOT NULL AND e.kind != 'heartbeat'
+		GROUP BY CAST(e.video_pos / ? AS INTEGER)
+		ORDER BY bucket_start`,
+		bucketSeconds, bucketSeconds, bucketSeconds, bucketSeconds, bucketSeconds, videoID, bucketSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []HeatmapBucket
+	for rows.Next() {
+		var b HeatmapBucket
+		if err := rows.Scan(&b.BucketStart, &b.BucketEnd, &b.PlayCount, &b.PauseCount, &b.SeekCount, &b.ChatCount, &b.CueCount, &b.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 // EventWithSession is an event tagged with its session ID for the dashboard feed.
 type EventWithSession struct {
 	recorder.Event

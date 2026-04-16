@@ -41,8 +41,45 @@ export interface FilmStatsWithMeta {
 	cues: FilmCue[];
 }
 
+export interface SystemSnapshot {
+	total_sessions: number;
+	active_sessions: number;
+	total_events: number;
+	uptime_seconds: number;
+	ws_connections: number;
+	cache_files: number;
+	cache_size_bytes: number;
+}
+
+export interface AISnapshot {
+	total_messages: number;
+	total_responses: number;
+	avg_response_length: number;
+	total_cue_plays: number;
+}
+
+export interface HeatmapBucket {
+	bucket_start: number;
+	bucket_end: number;
+	play_count: number;
+	pause_count: number;
+	seek_count: number;
+	chat_count: number;
+	cue_count: number;
+	total: number;
+}
+
+export interface SnapshotData {
+	sessions: SessionWithStats[];
+	events: EventWithSession[];
+	filmStats: FilmStatsWithMeta[];
+	systemStats?: SystemSnapshot;
+	aiStats?: AISnapshot;
+	heatmap: HeatmapBucket[];
+}
+
 export interface AdminCallbacks {
-	onSnapshot: (sessions: SessionWithStats[], events: EventWithSession[], filmStats: FilmStatsWithMeta[]) => void;
+	onSnapshot: (data: SnapshotData) => void;
 	onSessionCreated: (sessionId: string, payload: any) => void;
 	onEventsRecorded: (sessionId: string, events: any[]) => void;
 	onSessionIdle: (sessionId: string) => void;
@@ -71,7 +108,14 @@ export function createAdminWs(callbacks: AdminCallbacks): () => void {
 				const msg = JSON.parse(event.data);
 				switch (msg.type) {
 					case 'snapshot':
-						callbacks.onSnapshot(msg.sessions || [], msg.events || [], msg.film_stats || []);
+						callbacks.onSnapshot({
+							sessions: msg.sessions || [],
+							events: msg.events || [],
+							filmStats: msg.film_stats || [],
+							systemStats: msg.system_stats || undefined,
+							aiStats: msg.ai_stats || undefined,
+							heatmap: msg.heatmap || [],
+						});
 						break;
 					case 'session_created':
 						// payload is already parsed by top-level JSON.parse (json.RawMessage embeds inline)

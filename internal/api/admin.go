@@ -3,7 +3,11 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
 
+	"moonrise/internal/pubsub"
 	"moonrise/internal/store"
 	"moonrise/internal/video"
 
@@ -11,8 +15,10 @@ import (
 )
 
 type AdminHandler struct {
-	Store    *store.SessionStore
-	Registry *video.Registry
+	Store     *store.SessionStore
+	Registry  *video.Registry
+	Hub       *pubsub.Hub
+	StartTime time.Time
 }
 
 type sessionDetailResponse struct {
@@ -119,4 +125,81 @@ func (h *AdminHandler) ListFilms(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(films)
+}
+
+type statsResponse struct {
+	System         store.SystemStats `json:"system"`
+	AI             store.AIStats     `json:"ai"`
+	UptimeSeconds  int64             `json:"uptime_seconds"`
+	WsConnections  int               `json:"ws_connections"`
+	CacheFiles     int               `json:"cache_files"`
+	CacheSizeBytes int64             `json:"cache_size_bytes"`
+}
+
+func (h *AdminHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	sys, _ := h.Store.GetSystemStats()
+	ai, _ := h.Store.GetAIStats()
+
+	cacheFiles, cacheSize := ttsCacheStats("cache/cue-audio")
+
+	resp := statsResponse{
+		System:         sys,
+		AI:             ai,
+		UptimeSeconds:  int64(time.Since(h.StartTime).Seconds()),
+		WsConnections:  h.Hub.ConnectionCount(),
+		CacheFiles:     cacheFiles,
+		CacheSizeBytes: cacheSize,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *AdminHandler) GetHeatmap(w http.ResponseWriter, r *http.Request) {
+	videoID := r.URL.Query().Get("video_id")
+	if videoID == "" {
+		// Default to first film
+		films := h.Registry.List()
+		if len(films) > 0 {
+			videoID = films[0].ID
+		}
+	}
+
+	bucketSize := 60.0
+	if bs := r.URL.Query().Get("bucket_size"); bs != "" {
+		if v, err := strconv.ParseFloat(bs, 64); err == nil && v > 0 {
+			bucketSize = v
+		}
+	}
+
+	buckets, err := h.Store.GetHeatmap(videoID, bucketSize)
+	if err != nil {
+		http.Error(w, "failed to get heatmap", http.StatusInternalServerError)
+		return
+	}
+	if buckets == nil {
+		buckets = []store.HeatmapBucket{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(buckets)
+}
+
+func ttsCacheStats(dir string) (int, int64) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0
+	}
+	var totalSize int64
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			count++
+			totalSize += info.Size()
+		}
+	}
+	return count, totalSize
 }

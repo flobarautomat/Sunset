@@ -92,6 +92,8 @@ Cues are seeded from `cues.json` on startup so they're "configurable without a c
 | `GET`  | `/api/admin/sessions` | Paginated session list with latest event summary. |
 | `GET`  | `/api/admin/sessions/:id` | Full event timeline for one session. |
 | `GET`  | `/api/admin/films` | Film metadata + aggregate stats + cues per film. |
+| `GET`  | `/api/admin/stats` | System health + AI usage stats + uptime + cache. |
+| `GET`  | `/api/admin/heatmap` | Event density bucketed by video position. |
 | `WS`   | `/ws/admin` | Pushes `session_created`, `event_appended`, `session_idle` messages in real time. |
 
 All AI traffic is server-side. Client sends plain text to `/api/chat`, Go calls `/api/v1/chat/completions`, streams chunks back over SSE, and persists the final transcript.
@@ -569,9 +571,11 @@ Film card layout per film:
 
 ---
 
-#### Phase 7C.1 — System Health Widget
+#### Phase 7C.1 — System Health Widget ✅
 
 _Goal: server health overview — uptime, connections, totals, TTS cache stats._
+
+**Status: COMPLETE**
 
 **Backend — new store query (`internal/store/sessions.go`):**
 
@@ -650,9 +654,11 @@ Stats update live: session/event totals increment with incoming events, uptime t
 
 ---
 
-#### Phase 7C.2 — AI Usage Widget
+#### Phase 7C.2 — AI Usage Widget ✅
 
 _Goal: AI chat analytics — message counts, response metrics._
+
+**Status: COMPLETE**
 
 **Backend — new store query (`internal/store/sessions.go`):**
 
@@ -708,9 +714,11 @@ The recent conversations list is a filtered view of the existing feed — showin
 
 ---
 
-#### Phase 7C.3 — Timeline Heatmap Widget
+#### Phase 7C.3 — Timeline Heatmap Widget ✅
 
 _Goal: visualize where in the film viewers interact most — event density bucketed by video position, rendered as an SVG bar chart._
+
+**Status: COMPLETE**
 
 **Backend — new store query (`internal/store/sessions.go`):**
 

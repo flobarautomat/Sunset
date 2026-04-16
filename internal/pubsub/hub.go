@@ -44,6 +44,13 @@ func (h *Hub) Publish(msg Message) {
 	}
 }
 
+// ConnectionCount returns the number of active subscribers.
+func (h *Hub) ConnectionCount() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.subs)
+}
+
 // Subscribe returns a channel that receives published messages and an
 // unsubscribe function. The caller must call unsubscribe when done.
 func (h *Hub) Subscribe() (<-chan Message, func()) {

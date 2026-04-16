@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"time"
 
+	"os"
+
 	"moonrise/internal/pubsub"
 	"moonrise/internal/store"
 	"moonrise/internal/video"
@@ -16,9 +18,10 @@ import (
 )
 
 type Handler struct {
-	Hub      *pubsub.Hub
-	Store    *store.SessionStore
-	Registry *video.Registry
+	Hub       *pubsub.Hub
+	Store     *store.SessionStore
+	Registry  *video.Registry
+	StartTime time.Time
 }
 
 type filmStatsWithMeta struct {
@@ -39,11 +42,24 @@ type filmStatsWithMeta struct {
 	Cues           []store.Cue `json:"cues"`
 }
 
+type systemSnapshot struct {
+	TotalSessions  int   `json:"total_sessions"`
+	ActiveSessions int   `json:"active_sessions"`
+	TotalEvents    int   `json:"total_events"`
+	UptimeSeconds  int64 `json:"uptime_seconds"`
+	WsConnections  int   `json:"ws_connections"`
+	CacheFiles     int   `json:"cache_files"`
+	CacheSizeBytes int64 `json:"cache_size_bytes"`
+}
+
 type snapshotMessage struct {
-	Type      string                   `json:"type"`
-	Sessions  []store.SessionWithStats `json:"sessions"`
-	Events    []store.EventWithSession `json:"events"`
-	FilmStats []filmStatsWithMeta      `json:"film_stats"`
+	Type        string                   `json:"type"`
+	Sessions    []store.SessionWithStats `json:"sessions"`
+	Events      []store.EventWithSession `json:"events"`
+	FilmStats   []filmStatsWithMeta      `json:"film_stats"`
+	SystemStats *systemSnapshot          `json:"system_stats,omitempty"`
+	AIStats     *store.AIStats           `json:"ai_stats,omitempty"`
+	Heatmap     []store.HeatmapBucket    `json:"heatmap,omitempty"`
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -130,11 +146,34 @@ func (h *Handler) sendSnapshot(ctx context.Context, conn *websocket.Conn) error 
 	// Build film stats
 	filmStats := h.buildFilmStats()
 
+	// Build system stats
+	sysStats := h.buildSystemStats()
+
+	// Build AI stats
+	var aiStats *store.AIStats
+	if as, err := h.Store.GetAIStats(); err == nil {
+		aiStats = &as
+	}
+
+	// Build heatmap for first film
+	var heatmap []store.HeatmapBucket
+	if films := h.Registry.List(); len(films) > 0 {
+		if buckets, err := h.Store.GetHeatmap(films[0].ID, 60); err == nil {
+			heatmap = buckets
+		}
+	}
+	if heatmap == nil {
+		heatmap = []store.HeatmapBucket{}
+	}
+
 	return wsjson.Write(ctx, conn, snapshotMessage{
-		Type:      "snapshot",
-		Sessions:  sessions,
-		Events:    events,
-		FilmStats: filmStats,
+		Type:        "snapshot",
+		Sessions:    sessions,
+		Events:      events,
+		FilmStats:   filmStats,
+		SystemStats: sysStats,
+		AIStats:     aiStats,
+		Heatmap:     heatmap,
 	})
 }
 
@@ -175,4 +214,42 @@ func (h *Handler) buildFilmStats() []filmStatsWithMeta {
 		out = []filmStatsWithMeta{}
 	}
 	return out
+}
+
+func (h *Handler) buildSystemStats() *systemSnapshot {
+	sys, err := h.Store.GetSystemStats()
+	if err != nil {
+		return nil
+	}
+
+	cacheFiles, cacheSize := countCacheFiles("cache/cue-audio")
+
+	return &systemSnapshot{
+		TotalSessions:  sys.TotalSessions,
+		ActiveSessions: sys.ActiveSessions,
+		TotalEvents:    sys.TotalEvents,
+		UptimeSeconds:  int64(time.Since(h.StartTime).Seconds()),
+		WsConnections:  h.Hub.ConnectionCount(),
+		CacheFiles:     cacheFiles,
+		CacheSizeBytes: cacheSize,
+	}
+}
+
+func countCacheFiles(dir string) (int, int64) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0
+	}
+	var totalSize int64
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			count++
+			totalSize += info.Size()
+		}
+	}
+	return count, totalSize
 }
