@@ -17,10 +17,19 @@ export function createCueScheduler(
 	options: CueSchedulerOptions
 ): () => void {
 	let prevTime = 0;
+	let seeking = false;
 	const played = new Set<number>();
 
 	function onTimeUpdate() {
+		if (seeking) return;
 		const now = videoEl.currentTime;
+		const delta = now - prevTime;
+		// Skip cue checks on large jumps (>1.5s) — likely a seek that
+		// didn't go through the seeking/seeked event pair yet
+		if (delta > 1.5 || delta < 0) {
+			prevTime = now;
+			return;
+		}
 		for (const cue of options.cues) {
 			if (prevTime < cue.at_seconds && cue.at_seconds <= now && !played.has(cue.id)) {
 				played.add(cue.id);
@@ -30,7 +39,12 @@ export function createCueScheduler(
 		prevTime = now;
 	}
 
+	function onSeeking() {
+		seeking = true;
+	}
+
 	function onSeeked() {
+		seeking = false;
 		const now = videoEl.currentTime;
 		for (const cue of options.cues) {
 			if (cue.at_seconds > now) {
@@ -59,10 +73,12 @@ export function createCueScheduler(
 	}
 
 	videoEl.addEventListener('timeupdate', onTimeUpdate);
+	videoEl.addEventListener('seeking', onSeeking);
 	videoEl.addEventListener('seeked', onSeeked);
 
 	return function cleanup() {
 		videoEl.removeEventListener('timeupdate', onTimeUpdate);
+		videoEl.removeEventListener('seeking', onSeeking);
 		videoEl.removeEventListener('seeked', onSeeked);
 	};
 }
