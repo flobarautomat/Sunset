@@ -1,6 +1,6 @@
 # Moonrise — Implementation Plan
 
-_Draft v1 — iterate on this before writing any code._
+_Living document — updated as decisions are made and phases are completed._
 
 ## 1. Goals & non-goals
 
@@ -82,6 +82,8 @@ Cues are seeded from `cues.json` on startup so they're "configurable without a c
 
 | Method | Path | Purpose |
 |---|---|---|
+| `GET`  | `/api/videos` | List available videos (id, title, duration). |
+| `GET`  | `/api/videos/:id/stream` | Serve video file with range request support (HTTP 206). |
 | `POST` | `/api/sessions` | Create session, return `{session_id}`. |
 | `POST` | `/api/sessions/:id/events` | Append one or many events (batched from client). |
 | `GET`  | `/api/videos/:id/cues` | Cue list for the viewer to schedule locally. |
@@ -93,9 +95,11 @@ Cues are seeded from `cues.json` on startup so they're "configurable without a c
 
 All AI traffic is server-side. Client sends plain text to `/api/chat`, Go calls `/api/v1/chat/completions`, streams chunks back over SSE, and persists the final transcript.
 
+All video serving is server-side. Videos live in `data/videos/` and are served via `http.ServeContent` which handles `Range`, `If-Modified-Since`, and `Content-Type` headers — matching how a production CDN/origin would behave. The viewer discovers videos via `GET /api/videos` and sets `<video src="/api/videos/:id/stream">`.
+
 ## 6. Viewer app (`/watch`)
 
-- `<video>` element with a freely-licensed clip (Blender's Big Buck Bunny or a short NASA clip, committed to `/static`).
+- `<video>` element with `src="/api/videos/default/stream"` — video is served from the Go backend, not SvelteKit static.
 - On mount: `POST /api/sessions` → stash `session_id` in memory.
 - Attach listeners for `play`, `pause`, `seeking`, `ended`, `timeupdate` — push events in batches (every ~2s or on state change) to `/events`. Heartbeat every 10s.
 - **Cue scheduler (client-side):** fetch `/cues` once, track `currentTime`, trigger cue when `prev < at <= now`. Trigger = request `/cue-audio?cue_id` and play it via `<audio>`, log a `cue_played` event.
@@ -152,7 +156,9 @@ moonrise/
 │   ├── store/        # sqlite queries
 │   └── ws/           # websocket hub
 ├── data/
-│   └── cues.json
+│   ├── cues.json
+│   └── videos/
+│       └── default.mp4           # freely-licensed clip, served by backend
 ├── web/                          # SvelteKit app
 │   ├── src/routes/watch/+page.svelte
 │   ├── src/routes/admin/+page.svelte
@@ -166,77 +172,49 @@ Each phase ends with something runnable. Dependencies flow downward — don't sk
 
 ---
 
-### Phase 0 — Local dev setup
+### Phase 0 — Local dev setup ✅
 
 _Goal: all tools installed and verified. You can compile Go and run SvelteKit before writing any project code._
 
-**Prerequisites (one-time):**
-- Install Go: `brew install go` — verify with `go version` (need 1.22+)
-- Install Node: `brew install node` — verify with `node -v` (need 18+) and `npm -v`
-- You already have these if `which go` and `which node` return paths
+**Status: COMPLETE**
 
-**Bootstrap the Go module:**
-```bash
-mkdir moonrise && cd moonrise
-go mod init moonrise
-```
-This creates `go.mod`. Then pull in the three main dependencies:
-```bash
-go get github.com/go-chi/chi/v5
-go get nhooyr.io/websocket
-go get modernc.org/sqlite
-go get github.com/stretchr/testify
-```
-Each `go get` adds a line to `go.mod` and updates `go.sum`. Run `go mod tidy` afterward to clean up.
+**What was done:**
+- Installed Go 1.26.2 via `brew install go`
+- Installed Node 22.22.2 via `brew install node@22` (Node 23 is not in SvelteKit's supported range: `^20.19 || ^22.12 || >=24`)
+- Bootstrapped Go module with chi, websocket, sqlite, testify deps
+- Scaffolded SvelteKit skeleton (TypeScript, minimal template via `npx sv create`)
+- Created `.env.example`, `.env`, `.gitignore`, `run.sh`
+- `run.sh` auto-detects and uses Node 22 from homebrew keg path
+- Configured Vite proxy: `/api` and `/ws` → Go backend on `:8080`
 
-**Scaffold the SvelteKit app:**
-```bash
-npm create svelte@latest web
-```
-The CLI wizard will ask a few questions — pick "Skeleton project", TypeScript, and no extras (no Playwright, no Vitest for now). Then:
-```bash
-cd web && npm install && cd ..
-```
-This creates `web/package.json`, `web/node_modules/`, and the SvelteKit boilerplate.
-
-**Grab a video clip:**
-- Download a short (30–60s) freely-licensed clip — e.g. a Big Buck Bunny extract or a NASA public domain clip
-- Save to `web/static/video.mp4` — SvelteKit serves everything in `static/` at the root URL
-
-**Set up env vars:**
-- Create `.env` from `.env.example`:
-  ```
-  PORT=8080
-  SUNSET_API_KEY=<your key from the challenge email>
-  SUNSET_API_URL=https://staging.api.sunset.video
-  ```
-
-**Verify:**
-- `go build ./...` — compiles with zero errors (no code yet, but confirms deps resolve)
-- `cd web && npm run dev` — opens `http://localhost:5173` with the SvelteKit welcome page
-- You're ready for Phase 1
+**Decision: Node 22 over Node 23** — SvelteKit's latest `@sveltejs/vite-plugin-svelte@7.0.0` requires `^20.19 || ^22.12 || >=24`. Rather than downgrade the system Node, installed Node 22 alongside it. `run.sh` handles the PATH override.
 
 ---
 
-### Phase 1 — Scaffold & plumbing
+### Phase 1 — Scaffold & plumbing ✅
 
 _Goal: both servers start, talk to each other, and persist data. Nothing visible yet beyond "hello world."_
 
-**Go backend:**
-- `cmd/server/main.go` — chi router, graceful shutdown, CORS middleware, config from env vars (`PORT`, `API_KEY`, `SUNSET_API_URL`)
-- `internal/store/db.go` — open SQLite via `modernc.org/sqlite`, run `migrations/001_init.sql` on startup
-- `internal/store/migrations/001_init.sql` — `sessions`, `events`, `cues` tables + indexes (from section 4)
+**Status: COMPLETE**
 
-**SvelteKit:**
-- `web/` — `npm create svelte@latest`, TypeScript, minimal skeleton
-- `web/src/routes/watch/+page.svelte` — blank page, confirms Vite dev server proxies `/api` to Go
-- `web/vite.config.ts` — proxy rule: `/api` + `/ws` → `http://localhost:8080`
+**What was built:**
+- `cmd/server/main.go` — chi router with `/api` route group, graceful shutdown via `signal.NotifyContext`, CORS middleware, chi's `Logger` and `Recoverer`
+- `internal/config/config.go` — `Config` struct parsed from env, explicit wiring (no globals). `LoadOrDefault()` for dev (won't fail on missing API key), `Load()` for production (validates key)
+- `internal/store/db.go` — opens SQLite with WAL mode, `foreign_keys=ON`, `busy_timeout=5000`. Runs embedded migrations via `go:embed`
+- `internal/store/migrations/001_init.sql` — `sessions`, `events`, `cues` tables with indexes
+- `web/src/routes/watch/+page.svelte` — stub page, hits `/api/healthz` to confirm proxy works
+- `web/src/routes/admin/+page.svelte` — stub dashboard page, same backend check
+- `docs/design-decisions.md` — records all architectural choices with reasoning
 
-**Glue:**
-- `run.sh` — starts Go (`go run ./cmd/server`) and Vite (`cd web && npm run dev`) concurrently with `trap` cleanup
-- `.env.example` — documents all env vars
+**Key decisions made (see `docs/design-decisions.md`):**
+- Chi over stdlib — route grouping and middleware stack make intent scannable
+- Config struct with explicit wiring — no `os.Getenv` scattered through packages
+- Embedded SQL migrations — `.sql` files get syntax highlighting, adding a migration is just a new file
+- SQLite WAL mode — concurrent reads during writes for dashboard queries
+- Dashboard shows message content — more useful for demo, privacy noted as deliberate cut
+- All backend routes under `/api` prefix — clean Vite proxy boundary
 
-**Verify:** `./run.sh` starts both processes. Hitting `http://localhost:5173/watch` shows the blank page. `curl localhost:8080/healthz` returns 200.
+**Verified:** `go build ./...` clean, `curl localhost:8080/api/healthz` → `ok`, SvelteKit pages render with backend status
 
 ---
 
@@ -245,15 +223,15 @@ _Goal: both servers start, talk to each other, and persist data. Nothing visible
 _Goal: a user watches a video, and every play/pause/seek lands in SQLite. Tests prove the recorder logic is correct._
 
 **Go backend:**
+- `internal/api/videos.go` — `GET /api/videos` (list available videos from `data/videos/`) and `GET /api/videos/:id/stream` (serve video file via `http.ServeContent` with range request support)
 - `internal/recorder/recorder.go` — `Recorder` struct with `CreateSession(ua, videoID)` and `RecordEvents(sessionID, []Event)`. Accepts an `EventStore` interface so it's testable without a DB. Validates event kinds, clamps `video_pos`, collapses rapid heartbeats.
 - `internal/recorder/recorder_test.go` — the 5 tests from section 10 (`BatchesHeartbeats`, `RejectsUnknownKind`, `ClampsVideoPos`, `OrderingWithSeek`, `IdleTransition`). In-memory `EventStore` fake.
 - `internal/store/sessions.go` — SQLite implementation of `EventStore` interface
 - `internal/api/sessions.go` — `POST /api/sessions` (creates session, returns `{session_id}`) and `POST /api/sessions/:id/events` (accepts batch, calls recorder)
 
 **SvelteKit viewer:**
-- `web/static/video.mp4` — download a short freely-licensed clip (Big Buck Bunny 30s extract or similar)
 - `web/src/lib/tracker.ts` — `createTracker(sessionId)`: attaches `play`, `pause`, `seeking`, `ended`, `timeupdate` listeners to a `<video>` element, buffers events, flushes to `/api/sessions/:id/events` every 2s, sends heartbeat every 10s
-- `web/src/routes/watch/+page.svelte` — mounts `<video>`, calls `POST /api/sessions` on mount, wires up tracker
+- `web/src/routes/watch/+page.svelte` — mounts `<video src="/api/videos/default/stream">`, calls `POST /api/sessions` on mount, wires up tracker
 
 **Verify:** play/pause the video, then `sqlite3 moonrise.db "SELECT kind, video_pos FROM events ORDER BY at"` shows the event trail. `go test ./internal/recorder/...` passes.
 
@@ -342,6 +320,6 @@ Lead with the 3–5 choices I expect to defend:
 
 ## 15. Open questions for Brian
 
+- ~~Should the dashboard show AI message content, or just metadata?~~ → **Resolved: show content**, note privacy cut in README.
 - Any preference on the video clip (length, tone)? Short clip (~30–60s) makes cue testing faster.
 - Want me to include a `docker compose up` path, or is `./run.sh` enough?
-- Should the dashboard show AI message content, or just metadata (counts, timestamps) for privacy signaling?

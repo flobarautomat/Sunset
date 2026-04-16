@@ -1,0 +1,33 @@
+# Design Decisions
+
+Significant choices made during implementation and the reasoning behind them.
+
+---
+
+### Chi over stdlib `net/http`
+
+Go 1.22+ has built-in route patterns, which would eliminate a dependency. Chose chi because route grouping (`r.Route("/api", ...)`) and the middleware stack (`middleware.Logger`, `middleware.Recoverer`) reduce boilerplate without hiding behavior. The stdlib approach would mean hand-rolling middleware chaining and route prefixes — not hard, but chi makes the intent scannable at a glance.
+
+### Config struct with explicit wiring
+
+All configuration is parsed once in `main()` into a `Config` struct and passed explicitly to constructors. No global state, no `os.Getenv` scattered through packages. This makes the dependency graph visible from `main.go` and lets tests inject config without env var side effects.
+
+### Embedded SQL migrations via `go:embed`
+
+Schema lives in `.sql` files under `internal/store/migrations/`, embedded at compile time. Keeps SQL out of Go strings where it gets no syntax highlighting or linting. Adding a migration is "create a new .sql file" — no code changes to the migration runner.
+
+### SQLite with WAL mode and `modernc.org/sqlite`
+
+Pure-Go SQLite driver — no CGO, no cross-compilation headaches. WAL journal mode allows concurrent reads during writes, which matters when the dashboard queries while the viewer writes events. `busy_timeout=5000` avoids `SQLITE_BUSY` under light contention.
+
+### Dashboard shows message content
+
+The admin dashboard displays full AI chat content, not just metadata. For a demo this is more useful — you can see the conversation flow alongside video events. Privacy trade-off is noted in the README as a deliberate scope cut (no auth, no data redaction).
+
+### Backend-served video with range requests
+
+Videos live in `data/videos/` and are served by the Go backend via `http.ServeContent`, not from SvelteKit's `static/` directory. This matches how production works — video delivery goes through the backend where you can add auth, access logging, and CDN origin behavior. `http.ServeContent` handles `Range` headers (HTTP 206 Partial Content) which browsers need for seeking in `<video>` elements, plus `If-Modified-Since` and correct `Content-Type` for free. The viewer discovers available videos via `GET /api/videos` rather than hardcoding paths.
+
+### CORS as a simple middleware
+
+A minimal CORS handler that allows all origins. Fine for local dev and a demo — no need for a CORS library. Would tighten `Access-Control-Allow-Origin` to specific domains in production.
