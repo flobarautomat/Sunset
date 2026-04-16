@@ -1,0 +1,24 @@
+# Environment
+.env
+
+# Go
+/moonrise
+/server
+/cmd/server/server
+
+# Node
+web/node_modules/
+web/.svelte-kit/
+web/build/
+
+# SQLite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Cache
+cache/
+
+# OS
+.DS_Store
