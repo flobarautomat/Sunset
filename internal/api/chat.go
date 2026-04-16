@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"moonrise/internal/ai"
+	"moonrise/internal/pubsub"
 	"moonrise/internal/recorder"
 )
 
 type ChatHandler struct {
 	AI       *ai.Client
 	Recorder *recorder.Recorder
+	Hub      *pubsub.Hub
 }
 
 type chatRequest struct {
@@ -99,6 +101,15 @@ func (h *ChatHandler) Send(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.Recorder.RecordEvents(req.SessionID, events); err != nil {
 		log.Printf("failed to record chat events: %v", err)
+	}
+
+	if h.Hub != nil {
+		payload, _ := json.Marshal(events)
+		h.Hub.Publish(pubsub.Message{
+			Type:      pubsub.EventsRecorded,
+			SessionID: req.SessionID,
+			Payload:   payload,
+		})
 	}
 }
 

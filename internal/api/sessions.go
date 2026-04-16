@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"moonrise/internal/pubsub"
 	"moonrise/internal/recorder"
 
 	"github.com/go-chi/chi/v5"
@@ -11,6 +12,7 @@ import (
 
 type SessionsHandler struct {
 	Recorder *recorder.Recorder
+	Hub      *pubsub.Hub
 }
 
 type createSessionRequest struct {
@@ -41,6 +43,15 @@ func (h *SessionsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(createSessionResponse{SessionID: id})
+
+	if h.Hub != nil {
+		payload, _ := json.Marshal(map[string]string{"video_id": req.VideoID, "user_agent": ua})
+		h.Hub.Publish(pubsub.Message{
+			Type:      pubsub.SessionCreated,
+			SessionID: id,
+			Payload:   payload,
+		})
+	}
 }
 
 func (h *SessionsHandler) RecordEvents(w http.ResponseWriter, r *http.Request) {
@@ -58,4 +69,13 @@ func (h *SessionsHandler) RecordEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+
+	if h.Hub != nil {
+		payload, _ := json.Marshal(events)
+		h.Hub.Publish(pubsub.Message{
+			Type:      pubsub.EventsRecorded,
+			SessionID: sessionID,
+			Payload:   payload,
+		})
+	}
 }

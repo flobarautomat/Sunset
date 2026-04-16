@@ -12,10 +12,12 @@ import (
 	"moonrise/internal/ai"
 	"moonrise/internal/api"
 	"moonrise/internal/config"
+	"moonrise/internal/pubsub"
 	"moonrise/internal/recorder"
 	"moonrise/internal/store"
 	"moonrise/internal/tts"
 	"moonrise/internal/video"
+	"moonrise/internal/ws"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -34,6 +36,8 @@ func main() {
 	if err != nil {
 		log.Printf("warning: video registry: %v", err)
 	}
+
+	hub := pubsub.NewHub()
 
 	sessionStore := store.NewSessionStore(db)
 	rec := recorder.New(sessionStore)
@@ -56,10 +60,12 @@ func main() {
 	)
 
 	videosHandler := &api.VideosHandler{Registry: registry}
-	sessionsHandler := &api.SessionsHandler{Recorder: rec}
+	sessionsHandler := &api.SessionsHandler{Recorder: rec, Hub: hub}
 	cuesHandler := &api.CuesHandler{Store: sessionStore, TTS: ttsProvider}
-	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec}
+	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec, Hub: hub}
 	ttsHandler := &api.TTSHandler{TTS: ttsProvider}
+	adminHandler := &api.AdminHandler{Store: sessionStore}
+	wsHandler := &ws.Handler{Hub: hub, Store: sessionStore}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -82,6 +88,9 @@ func main() {
 
 		r.Get("/cue-audio", cuesHandler.Audio)
 		r.Post("/tts", ttsHandler.Speak)
+		r.Get("/admin/sessions", adminHandler.ListSessions)
+		r.Get("/admin/sessions/{id}", adminHandler.GetSession)
+
 		r.Get("/config", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
@@ -90,6 +99,8 @@ func main() {
 		})
 	})
 
+	r.Get("/ws/admin", wsHandler.ServeHTTP)
+
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
 		Handler: r,
@@ -97,6 +108,38 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	// Idle sweep: detect sessions that stopped sending heartbeats
+	go func() {
+		idle := make(map[string]bool)
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sessions, err := sessionStore.ListSessions()
+				if err != nil {
+					continue
+				}
+				now := time.Now().UnixMilli()
+				fresh := make(map[string]bool)
+				for _, s := range sessions {
+					if now-s.LastSeenAt > 30000 {
+						fresh[s.ID] = true
+						if !idle[s.ID] {
+							hub.Publish(pubsub.Message{
+								Type:      pubsub.SessionIdle,
+								SessionID: s.ID,
+							})
+						}
+					}
+				}
+				idle = fresh
+			}
+		}
+	}()
 
 	go func() {
 		log.Printf("moonrise listening on :%s", cfg.Port)
