@@ -249,7 +249,6 @@
 			<span class="header-label">DASHBOARD</span>
 		</div>
 		<div class="header-right">
-			<a href="/watch" class="watch-link">/watch</a>
 			<span class="connection-dot" class:connected title={connected ? 'Connected' : 'Disconnected'}></span>
 			<span class="connection-label">{connected ? 'live' : 'offline'}</span>
 		</div>
@@ -356,6 +355,17 @@
 			</div>
 		</section>
 	</div>
+
+	<nav class="tab-nav">
+		<a href="/watch" class="tab">
+			<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><polygon points="5,3 19,12 5,21" /></svg>
+			Watch
+		</a>
+		<a href="/admin" class="tab active" aria-current="page">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+			Dashboard
+		</a>
+	</nav>
 </div>
 
 <style>
@@ -411,18 +421,6 @@
 		display: flex;
 		align-items: center;
 		gap: 10px;
-	}
-
-	.watch-link {
-		font-size: 0.8rem;
-		color: rgba(255, 255, 255, 0.5);
-		text-decoration: none;
-		font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-		transition: color 0.15s;
-	}
-
-	.watch-link:hover {
-		color: #e50914;
 	}
 
 	.connection-dot {
@@ -765,5 +763,44 @@
 
 	.timeline-line {
 		padding-left: 40px;
+	}
+
+	/* Tab nav */
+	.tab-nav {
+		flex-shrink: 0;
+		display: flex;
+		gap: 2px;
+		padding: 8px 16px;
+		background: rgba(0, 0, 0, 0.4);
+		border-top: 1px solid rgba(255, 255, 255, 0.08);
+	}
+
+	.tab {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 8px 12px;
+		border-radius: 8px;
+		font-family: system-ui, -apple-system, sans-serif;
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: rgba(255, 255, 255, 0.45);
+		text-decoration: none;
+		transition: color 0.15s ease, background 0.15s ease;
+		white-space: nowrap;
+	}
+
+	.tab:hover {
+		color: rgba(255, 255, 255, 0.7);
+		background: rgba(255, 255, 255, 0.06);
+	}
+
+	.tab.active {
+		color: #fff;
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	.tab svg {
+		opacity: 0.8;
 	}
 </style>

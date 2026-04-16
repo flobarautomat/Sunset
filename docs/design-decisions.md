@@ -4,26 +4,6 @@ Significant choices made during implementation and the reasoning behind them.
 
 ---
 
-### Chi over stdlib `net/http`
-
-Go 1.22+ has built-in route patterns, which would eliminate a dependency. Chose chi because route grouping (`r.Route("/api", ...)`) and the middleware stack (`middleware.Logger`, `middleware.Recoverer`) reduce boilerplate without hiding behavior. The stdlib approach would mean hand-rolling middleware chaining and route prefixes — not hard, but chi makes the intent scannable at a glance.
-
-### Config struct with explicit wiring
-
-All configuration is parsed once in `main()` into a `Config` struct and passed explicitly to constructors. No global state, no `os.Getenv` scattered through packages. This makes the dependency graph visible from `main.go` and lets tests inject config without env var side effects.
-
-### Embedded SQL migrations via `go:embed`
-
-Schema lives in `.sql` files under `internal/store/migrations/`, embedded at compile time. Keeps SQL out of Go strings where it gets no syntax highlighting or linting. Adding a migration is "create a new .sql file" — no code changes to the migration runner.
-
-### SQLite with WAL mode and `modernc.org/sqlite`
-
-Pure-Go SQLite driver — no CGO, no cross-compilation headaches. WAL journal mode allows concurrent reads during writes, which matters when the dashboard queries while the viewer writes events. `busy_timeout=5000` avoids `SQLITE_BUSY` under light contention.
-
-### Dashboard shows message content
-
-The admin dashboard displays full AI chat content, not just metadata. For a demo this is more useful — you can see the conversation flow alongside video events. Privacy trade-off is noted in the README as a deliberate scope cut (no auth, no data redaction).
-
 ### Backend-served video with range requests
 
 Videos live in `data/videos/` and are served by the Go backend via `http.ServeContent`, not from SvelteKit's `static/` directory. This matches how production works — video delivery goes through the backend where you can add auth, access logging, and CDN origin behavior. `http.ServeContent` handles `Range` headers (HTTP 206 Partial Content) which browsers need for seeking in `<video>` elements, plus `If-Modified-Since` and correct `Content-Type` for free. The viewer discovers available videos via `GET /api/videos` rather than hardcoding paths.
@@ -40,9 +20,6 @@ Extract duration, resolution, and bitrate from mp4 files at startup using a pure
 
 The recorder owns both session creation and event recording behind an `EventStore` interface. API handlers are thin — they decode JSON and call the recorder. This makes the core logic unit-testable with an in-memory fake store (no database, no HTTP). Only heartbeats are collapsed (within a 5s window); play/pause/seek pass through as-is since they're cheap and the dashboard can filter if needed.
 
-### CORS as a simple middleware
-
-A minimal CORS handler that allows all origins. Fine for local dev and a demo — no need for a CORS library. Would tighten `Access-Control-Allow-Origin` to specific domains in production.
 
 ### Custom video player over native controls
 
@@ -87,7 +64,3 @@ When a voice cue triggers during playback, its narration text is added to the ch
 ### Unified speech module for both playback modes
 
 The `speech.ts` module handles both browser `speechSynthesis` and `HTMLAudioElement` (mp3) playback behind the same state interface. Pause/resume/cancel work identically regardless of which mode is active. This means per-bubble controls, cue playback, and chat TTS all share one state machine — no parallel tracking of audio elements vs speech utterances. The module exposes an `onChange` listener so Svelte reactive state stays in sync without polling.
-
-### System message folded into first user message for Sunset proxy
-
-The Sunset staging proxy silently drops `role: "system"` messages in streaming mode — returning `data: [DONE]` immediately with a 200 status and no error. This caused chat to appear broken (empty responses) despite the API key being valid. The fix: `chatStreamSunset` extracts system message content and prepends it to the first user message before sending. The Anthropic direct path is unaffected since it already handles system messages via the dedicated `system` field in the Anthropic Messages API. This is a known limitation of some OpenAI-compatible proxies and a common workaround.

@@ -524,8 +524,18 @@
 			</div>
 		{/if}
 
-		<div class="prompt-bar">
-			<form onsubmit={(e) => { e.preventDefault(); handlePromptSubmit(); }}>
+		<div class="bottom-bar">
+			<nav class="tab-nav">
+				<a href="/watch" class="tab active" aria-current="page">
+					<svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><polygon points="5,3 19,12 5,21" /></svg>
+					Watch
+				</a>
+				<a href="/admin" class="tab">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+					Dashboard
+				</a>
+			</nav>
+			<form class="prompt-form" onsubmit={(e) => { e.preventDefault(); handlePromptSubmit(); }}>
 				<input
 					type="text"
 					bind:value={promptText}
@@ -888,20 +898,59 @@
 		25% { opacity: 0.2; }
 	}
 
-	.prompt-bar {
+	.bottom-bar {
 		flex-shrink: 0;
-		padding: 10px 16px;
-		background: rgba(0, 0, 0, 0.3);
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 8px 16px;
+		background: rgba(0, 0, 0, 0.4);
 	}
 
-	.prompt-bar form {
+	.tab-nav {
+		display: flex;
+		gap: 2px;
+		flex-shrink: 0;
+	}
+
+	.tab {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding: 8px 12px;
+		border-radius: 8px;
+		font-family: system-ui, -apple-system, sans-serif;
+		font-size: 0.8rem;
+		font-weight: 500;
+		color: rgba(255, 255, 255, 0.45);
+		text-decoration: none;
+		transition: color 0.15s ease, background 0.15s ease;
+		white-space: nowrap;
+	}
+
+	.tab:hover {
+		color: rgba(255, 255, 255, 0.7);
+		background: rgba(255, 255, 255, 0.06);
+	}
+
+	.tab.active {
+		color: #fff;
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	.tab svg {
+		opacity: 0.8;
+	}
+
+	.prompt-form {
 		display: flex;
 		gap: 8px;
+		flex: 1;
 		max-width: 600px;
 		margin: 0 auto;
 	}
 
-	.prompt-bar input {
+	.prompt-form input {
 		flex: 1;
 		padding: 10px 14px;
 		border-radius: 24px;
@@ -914,19 +963,19 @@
 		transition: border-color 0.2s ease;
 	}
 
-	.prompt-bar input::placeholder {
+	.prompt-form input::placeholder {
 		color: rgba(255, 255, 255, 0.4);
 	}
 
-	.prompt-bar input:focus {
+	.prompt-form input:focus {
 		border-color: rgba(255, 255, 255, 0.5);
 	}
 
-	.prompt-bar input:disabled {
+	.prompt-form input:disabled {
 		opacity: 0.5;
 	}
 
-	.prompt-bar button {
+	.prompt-form button {
 		background: #e50914;
 		border: none;
 		border-radius: 50%;
@@ -941,11 +990,11 @@
 		flex-shrink: 0;
 	}
 
-	.prompt-bar button:hover:not(:disabled) {
+	.prompt-form button:hover:not(:disabled) {
 		background: #f40612;
 	}
 
-	.prompt-bar button:disabled {
+	.prompt-form button:disabled {
 		opacity: 0.4;
 		cursor: not-allowed;
 	}
