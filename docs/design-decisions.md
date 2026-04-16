@@ -47,3 +47,11 @@ A minimal CORS handler that allows all origins. Fine for local dev and a demo �
 ### Custom video player over native controls
 
 Native `<video controls>` can't render cue markers on the seek bar or provide a consistent dark UI. Building custom controls turns the seek bar into a data visualization surface — cue positions now, potentially a watch-progress heatmap later. The trade-off is more frontend code and losing built-in accessibility, mitigated by keeping keyboard shortcuts (space for play/pause) and using semantic HTML where possible. Full-viewport layout (not the Fullscreen API) with auto-hiding controls matches the Netflix pattern without requiring OS-level fullscreen permission.
+
+### Stateless AI chat proxy
+
+The Go backend proxies chat requests to the Sunset staging API (`staging.api.sunset.video/api/v1/chat/completions`) with SSE streaming. The backend is stateless — the frontend owns conversation history and sends the full message array with each request. This avoids server-side session memory management and keeps the backend simple. Events (`ai_message`, `ai_response`) are persisted to SQLite after each exchange for analytics, but are never used to reconstruct conversation state. The model is configurable via `AI_MODEL` env var (defaults to `anthropic/claude-haiku-4-5-20251001` for speed; can switch to sonnet for quality).
+
+### Resizable chat panel over modal or sidebar
+
+The chat panel is a bottom drawer that starts at 1/3 viewport height and is drag-resizable. The video shrinks to fill remaining space above. This keeps the video always visible (unlike a modal) and uses horizontal space better than a sidebar (video aspect ratio is landscape). When collapsed, only the prompt input bar shows — always accessible without expanding the full chat history.

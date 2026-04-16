@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { createTracker } from '$lib/tracker';
+	import { sendMessage, type ChatMessage } from '$lib/chat';
 
 	interface Cue {
 		id: number;
@@ -13,6 +14,7 @@
 	let videoEl: HTMLVideoElement;
 	let containerEl: HTMLDivElement;
 	let seekBarEl: HTMLDivElement;
+	let messagesEl = $state<HTMLDivElement>();
 
 	let sessionId = $state('');
 	let status = $state('initializing...');
@@ -28,6 +30,13 @@
 	let seeking = $state(false);
 	let backendDuration = $state(0);
 
+	// Chat state
+	let chatMessages = $state<ChatMessage[]>([]);
+	let chatOpen = $state(false);
+	let chatHeight = $state(300);
+	let streaming = $state(false);
+	let dragging = $state(false);
+
 	let hideTimeout: ReturnType<typeof setTimeout>;
 
 	function formatTime(seconds: number): string {
@@ -39,8 +48,6 @@
 		return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
 	}
 
-	// For large mp4s where the browser can't determine duration (moov atom at end of file),
-	// we fall back to the backend's metadata which parsed it at startup.
 	function effectiveDuration(): number {
 		if (duration > 0 && isFinite(duration)) return duration;
 		return backendDuration;
@@ -121,14 +128,82 @@
 		}
 	}
 
-	function handlePromptSubmit() {
-		if (!promptText.trim()) return;
-		// Stub — Phase 3 will wire this to /api/chat
+	// Drag-to-resize chat panel
+	function onDragHandleMouseDown(e: MouseEvent) {
+		e.preventDefault();
+		dragging = true;
+		const startY = e.clientY;
+		const startHeight = chatHeight;
+
+		function onMove(e: MouseEvent) {
+			const delta = startY - e.clientY;
+			const newHeight = Math.max(56, Math.min(window.innerHeight * 0.7, startHeight + delta));
+			chatHeight = newHeight;
+			if (newHeight > 80) chatOpen = true;
+		}
+
+		function onUp() {
+			dragging = false;
+			if (chatHeight < 80) {
+				chatOpen = false;
+			}
+			window.removeEventListener('mousemove', onMove);
+			window.removeEventListener('mouseup', onUp);
+		}
+
+		window.addEventListener('mousemove', onMove);
+		window.addEventListener('mouseup', onUp);
+	}
+
+	async function handlePromptSubmit() {
+		if (!promptText.trim() || streaming) return;
+
+		const userMsg: ChatMessage = { role: 'user', content: promptText };
+		chatMessages = [...chatMessages, userMsg];
+		const assistantMsg: ChatMessage = { role: 'assistant', content: '' };
+		chatMessages = [...chatMessages, assistantMsg];
+
+		chatOpen = true;
+		if (chatHeight < 200) chatHeight = 300;
+		const msgText = promptText;
 		promptText = '';
+		streaming = true;
+
+		const history = chatMessages.slice(0, -2);
+
+		await sendMessage(
+			sessionId,
+			msgText,
+			currentTime,
+			history,
+			(token) => {
+				const lastIdx = chatMessages.length - 1;
+				chatMessages[lastIdx] = {
+					...chatMessages[lastIdx],
+					content: chatMessages[lastIdx].content + token
+				};
+				tick().then(() => {
+					if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+				});
+			},
+			() => {
+				streaming = false;
+			},
+			(error) => {
+				streaming = false;
+				const lastIdx = chatMessages.length - 1;
+				chatMessages[lastIdx] = {
+					...chatMessages[lastIdx],
+					content: `Error: ${error}`
+				};
+			}
+		);
 	}
 
 	onMount(() => {
 		let cleanup: (() => void) | undefined;
+
+		chatHeight = Math.round(window.innerHeight / 3);
 
 		async function init() {
 			try {
@@ -146,7 +221,6 @@
 				status = 'connected';
 				cleanup = createTracker(sessionId, videoEl);
 
-				// Fetch video metadata for duration fallback (browser may not know it for large files)
 				try {
 					const videosRes = await fetch('/api/videos');
 					if (videosRes.ok) {
@@ -160,7 +234,6 @@
 					// Non-critical
 				}
 
-				// Fetch cues
 				try {
 					const cueRes = await fetch('/api/videos/default/cues');
 					if (cueRes.ok) {
@@ -191,113 +264,140 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-	class="player-container"
-	class:hide-cursor={!showControls}
-	bind:this={containerEl}
-	onmousemove={onMouseActivity}
->
-	<!-- svelte-ignore a11y_media_has_caption -->
-	<video
-		bind:this={videoEl}
-		src="/api/videos/default/stream"
-		onclick={togglePlay}
-		onplay={() => playing = true}
-		onpause={() => playing = false}
-		ontimeupdate={() => { if (!seeking) currentTime = videoEl.currentTime; }}
-		onloadedmetadata={() => duration = videoEl.duration}
-		ondurationchange={() => duration = videoEl.duration}
-	></video>
+<div class="page-layout">
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div
+		class="video-section"
+		class:hide-cursor={!showControls}
+		bind:this={containerEl}
+		onmousemove={onMouseActivity}
+	>
+		<!-- svelte-ignore a11y_media_has_caption -->
+		<video
+			bind:this={videoEl}
+			src="/api/videos/default/stream"
+			onclick={togglePlay}
+			onplay={() => playing = true}
+			onpause={() => playing = false}
+			ontimeupdate={() => { if (!seeking) currentTime = videoEl.currentTime; }}
+			onloadedmetadata={() => duration = videoEl.duration}
+			ondurationchange={() => duration = videoEl.duration}
+		></video>
 
-	{#if status !== 'connected'}
-		<div class="status-overlay">
-			<p>{status}</p>
-		</div>
-	{/if}
+		{#if status !== 'connected'}
+			<div class="status-overlay">
+				<p>{status}</p>
+			</div>
+		{/if}
 
-	<div class="controls" class:visible={showControls}>
-		<div class="seek-container">
-			<!-- svelte-ignore a11y_no_static_element_interactions -->
-			<div
-				class="seek-bar"
-				bind:this={seekBarEl}
-				onmousedown={onSeekBarMouseDown}
-			>
-				<div class="seek-track">
-					<div class="seek-progress" style="width: {progress}%"></div>
-					<div class="seek-thumb" style="left: {progress}%"></div>
+		<div class="controls" class:visible={showControls}>
+			<div class="seek-container">
+				<!-- svelte-ignore a11y_no_static_element_interactions -->
+				<div
+					class="seek-bar"
+					bind:this={seekBarEl}
+					onmousedown={onSeekBarMouseDown}
+				>
+					<div class="seek-track">
+						<div class="seek-progress" style="width: {progress}%"></div>
+						<div class="seek-thumb" style="left: {progress}%"></div>
+					</div>
+
+					{#each cues as cue}
+						{@const pos = effectiveDuration() > 0 ? (cue.at_seconds / effectiveDuration()) * 100 : 0}
+						<!-- svelte-ignore a11y_no_static_element_interactions -->
+						<div
+							class="cue-marker"
+							style="left: {pos}%"
+							onmouseenter={(e) => onCueHover(cue, e)}
+							onmouseleave={onCueLeave}
+							onclick={(e) => { e.stopPropagation(); seekToCue(cue); }}
+						></div>
+					{/each}
 				</div>
 
-				{#each cues as cue}
-					{@const pos = effectiveDuration() > 0 ? (cue.at_seconds / effectiveDuration()) * 100 : 0}
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
-						class="cue-marker"
-						style="left: {pos}%"
-						onmouseenter={(e) => onCueHover(cue, e)}
-						onmouseleave={onCueLeave}
-						onclick={(e) => { e.stopPropagation(); seekToCue(cue); }}
-					></div>
-				{/each}
+				{#if hoveredCue}
+					<div class="cue-tooltip" style="left: {cueTooltipX}px">
+						{hoveredCue.prompt}
+					</div>
+				{/if}
 			</div>
 
-			{#if hoveredCue}
-				<div class="cue-tooltip" style="left: {cueTooltipX}px">
-					{hoveredCue.prompt}
-				</div>
-			{/if}
-		</div>
+			<div class="controls-row">
+				<button class="control-btn" onclick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>
+					{#if playing}
+						<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+							<rect x="6" y="4" width="4" height="16" />
+							<rect x="14" y="4" width="4" height="16" />
+						</svg>
+					{:else}
+						<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+							<polygon points="5,3 19,12 5,21" />
+						</svg>
+					{/if}
+				</button>
 
-		<div class="controls-row">
-			<button class="control-btn" onclick={togglePlay} aria-label={playing ? 'Pause' : 'Play'}>
-				{#if playing}
-					<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-						<rect x="6" y="4" width="4" height="16" />
-						<rect x="14" y="4" width="4" height="16" />
-					</svg>
-				{:else}
-					<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-						<polygon points="5,3 19,12 5,21" />
-					</svg>
-				{/if}
-			</button>
+				<button class="control-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
+					{#if muted}
+						<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+							<polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
+							<line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2" />
+							<line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2" />
+						</svg>
+					{:else}
+						<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
+							<polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
+							<path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="2" />
+							<path d="M19.07 4.93a10 10 0 010 14.14" fill="none" stroke="currentColor" stroke-width="2" />
+						</svg>
+					{/if}
+				</button>
 
-			<button class="control-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'}>
-				{#if muted}
-					<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-						<polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
-						<line x1="23" y1="9" x2="17" y2="15" stroke="currentColor" stroke-width="2" />
-						<line x1="17" y1="9" x2="23" y2="15" stroke="currentColor" stroke-width="2" />
-					</svg>
-				{:else}
-					<svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">
-						<polygon points="11,5 6,9 2,9 2,15 6,15 11,19" />
-						<path d="M15.54 8.46a5 5 0 010 7.07" fill="none" stroke="currentColor" stroke-width="2" />
-						<path d="M19.07 4.93a10 10 0 010 14.14" fill="none" stroke="currentColor" stroke-width="2" />
-					</svg>
-				{/if}
-			</button>
-
-			<span class="time-display">
-				{formatTime(currentTime)} / {formatTime(effectiveDuration())}
-			</span>
+				<span class="time-display">
+					{formatTime(currentTime)} / {formatTime(effectiveDuration())}
+				</span>
+			</div>
 		</div>
 	</div>
 
-	<div class="prompt-bar">
-		<form onsubmit={(e) => { e.preventDefault(); handlePromptSubmit(); }}>
-			<input
-				type="text"
-				bind:value={promptText}
-				placeholder="Ask something about the scene..."
-			/>
-			<button type="submit" aria-label="Send">
-				<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-					<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-				</svg>
-			</button>
-		</form>
+	<div
+		class="chat-panel"
+		class:dragging
+		style="height: {chatOpen ? chatHeight : 56}px"
+	>
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div class="drag-handle" onmousedown={onDragHandleMouseDown}>
+			<div class="drag-pill"></div>
+		</div>
+
+		{#if chatOpen}
+			<div class="chat-messages" bind:this={messagesEl}>
+				{#each chatMessages as msg}
+					<div class="bubble {msg.role}">
+						{msg.content}
+						{#if msg.role === 'assistant' && streaming && msg === chatMessages[chatMessages.length - 1] && !msg.content}
+							<span class="typing-indicator">...</span>
+						{/if}
+					</div>
+				{/each}
+			</div>
+		{/if}
+
+		<div class="prompt-bar">
+			<form onsubmit={(e) => { e.preventDefault(); handlePromptSubmit(); }}>
+				<input
+					type="text"
+					bind:value={promptText}
+					placeholder="Ask something about the scene..."
+					disabled={streaming}
+				/>
+				<button type="submit" aria-label="Send" disabled={streaming || !promptText.trim()}>
+					<svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+						<path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+					</svg>
+				</button>
+			</form>
+		</div>
 	</div>
 </div>
 
@@ -309,17 +409,25 @@
 		background: #000;
 	}
 
-	.player-container {
+	.page-layout {
+		display: flex;
+		flex-direction: column;
 		width: 100vw;
 		height: 100vh;
+	}
+
+	.video-section {
+		flex: 1;
+		min-height: 0;
 		position: relative;
 		background: #000;
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		overflow: hidden;
 	}
 
-	.player-container.hide-cursor {
+	.video-section.hide-cursor {
 		cursor: none;
 	}
 
@@ -341,7 +449,7 @@
 
 	.controls {
 		position: absolute;
-		bottom: 60px;
+		bottom: 0;
 		left: 0;
 		right: 0;
 		padding: 40px 16px 12px;
@@ -475,13 +583,92 @@
 		user-select: none;
 	}
 
+	/* Chat panel */
+	.chat-panel {
+		flex-shrink: 0;
+		display: flex;
+		flex-direction: column;
+		background: rgba(20, 20, 20, 0.95);
+		border-top: 1px solid rgba(255, 255, 255, 0.1);
+		transition: height 0.2s ease;
+		overflow: hidden;
+	}
+
+	.chat-panel.dragging {
+		transition: none;
+		user-select: none;
+	}
+
+	.drag-handle {
+		height: 6px;
+		flex-shrink: 0;
+		cursor: ns-resize;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(255, 255, 255, 0.05);
+	}
+
+	.drag-handle:hover {
+		background: rgba(255, 255, 255, 0.1);
+	}
+
+	.drag-pill {
+		width: 40px;
+		height: 3px;
+		background: rgba(255, 255, 255, 0.3);
+		border-radius: 2px;
+	}
+
+	.chat-messages {
+		flex: 1;
+		overflow-y: auto;
+		padding: 12px 16px;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+		min-height: 0;
+	}
+
+	.bubble {
+		max-width: 75%;
+		padding: 10px 14px;
+		border-radius: 16px;
+		font-size: 0.9rem;
+		font-family: system-ui, -apple-system, sans-serif;
+		line-height: 1.4;
+		word-wrap: break-word;
+		white-space: pre-wrap;
+	}
+
+	.bubble.user {
+		align-self: flex-start;
+		background: rgba(255, 255, 255, 0.1);
+		color: #fff;
+		border-bottom-left-radius: 4px;
+	}
+
+	.bubble.assistant {
+		align-self: flex-end;
+		background: #e50914;
+		color: #fff;
+		border-bottom-right-radius: 4px;
+	}
+
+	.typing-indicator {
+		opacity: 0.6;
+		animation: blink 1s infinite;
+	}
+
+	@keyframes blink {
+		0%, 50% { opacity: 0.6; }
+		25% { opacity: 0.2; }
+	}
+
 	.prompt-bar {
-		position: absolute;
-		bottom: 0;
-		left: 0;
-		right: 0;
+		flex-shrink: 0;
 		padding: 10px 16px;
-		background: rgba(0, 0, 0, 0.7);
+		background: rgba(0, 0, 0, 0.3);
 	}
 
 	.prompt-bar form {
@@ -512,6 +699,10 @@
 		border-color: rgba(255, 255, 255, 0.5);
 	}
 
+	.prompt-bar input:disabled {
+		opacity: 0.5;
+	}
+
 	.prompt-bar button {
 		background: #e50914;
 		border: none;
@@ -527,7 +718,12 @@
 		flex-shrink: 0;
 	}
 
-	.prompt-bar button:hover {
+	.prompt-bar button:hover:not(:disabled) {
 		background: #f40612;
+	}
+
+	.prompt-bar button:disabled {
+		opacity: 0.4;
+		cursor: not-allowed;
 	}
 </style>

@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"moonrise/internal/ai"
 	"moonrise/internal/api"
 	"moonrise/internal/config"
 	"moonrise/internal/recorder"
@@ -35,9 +36,12 @@ func main() {
 	sessionStore := store.NewSessionStore(db)
 	rec := recorder.New(sessionStore)
 
+	aiClient := ai.NewClient(cfg.SunsetAPIURL, cfg.SunsetAPIKey, cfg.AIModel)
+
 	videosHandler := &api.VideosHandler{Registry: registry}
 	sessionsHandler := &api.SessionsHandler{Recorder: rec}
 	cuesHandler := &api.CuesHandler{Store: sessionStore}
+	chatHandler := &api.ChatHandler{AI: aiClient, Recorder: rec}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -55,9 +59,9 @@ func main() {
 
 		r.Post("/sessions", sessionsHandler.Create)
 		r.Post("/sessions/{id}/events", sessionsHandler.RecordEvents)
-	})
 
-	_ = cfg
+		r.Post("/chat", chatHandler.Send)
+	})
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

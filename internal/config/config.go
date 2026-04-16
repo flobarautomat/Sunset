@@ -9,6 +9,7 @@ type Config struct {
 	Port         string
 	SunsetAPIKey string
 	SunsetAPIURL string
+	AIModel      string
 }
 
 func Load() (*Config, error) {
@@ -30,6 +31,7 @@ func LoadOrDefault() *Config {
 		Port:         envOr("PORT", "8080"),
 		SunsetAPIKey: os.Getenv("SUNSET_API_KEY"),
 		SunsetAPIURL: envOr("SUNSET_API_URL", "https://staging.api.sunset.video"),
+		AIModel:      envOr("AI_MODEL", "anthropic/claude-haiku-4-5-20251001"),
 	}
 }
 

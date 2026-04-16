@@ -271,19 +271,19 @@ _Goal: replace the bare `<video>` with an immersive full-viewport player with cu
 
 ---
 
-### Phase 3 — AI chat (streaming)
+### Phase 3 — AI chat (streaming) ✅
 
 _Goal: user sends a message in the viewer, gets a streamed LLM response, exchange is persisted as events._
 
 **Go backend:**
-- `internal/ai/client.go` — `ChatStream(ctx, model, messages) <-chan Chunk` — calls `staging.api.sunset.video/api/v1/chat/completions` with `stream: true`, parses SSE, yields `Chunk{Text, Done, Err}` on a channel
-- `internal/api/chat.go` — `POST /api/chat` handler. Reads `{session_id, message, video_pos}`. Calls `ai.ChatStream`, writes each chunk as an SSE event to the HTTP response (`text/event-stream`). On stream end, persists `ai_message` + `ai_response` events via recorder.
+- `internal/ai/client.go` — `Client` struct with `ChatStream(ctx, messages) <-chan Chunk`. POST to `staging.api.sunset.video/api/v1/chat/completions` with `stream: true`, parses SSE line-by-line via `bufio.Scanner`, yields `Chunk{Text, Done, Err}` on a channel. No external SSE library.
+- `internal/api/chat.go` — `POST /api/chat` handler. Reads `{session_id, message, video_pos, history}`. Prepends system prompt with video position context, appends history + new user message. Calls `ai.ChatStream`, writes each chunk as an SSE event (`text/event-stream`), flushes after each write. On stream end, persists `ai_message` + `ai_response` events via recorder. Returns 503 if API key not configured.
 
 **SvelteKit viewer:**
-- `web/src/lib/chat.ts` — `sendMessage(sessionId, message, videoPos)`: opens `fetch` to `/api/chat` with streaming body reader, yields tokens via a callback or async iterator
-- `web/src/routes/watch/+page.svelte` — add chat panel below video: message list + text input. On submit, calls `sendMessage`, appends tokens to the assistant bubble as they arrive (typewriter effect). Includes `video_pos` from `currentTime`.
+- `web/src/lib/chat.ts` — `sendMessage(sessionId, message, videoPos, history, onToken, onDone, onError)`: POST fetch to `/api/chat`, reads from `ReadableStream`, buffers partial SSE frames, parses `data:` lines for content tokens. Callback-based API for typewriter rendering.
+- `web/src/routes/watch/+page.svelte` — resizable bottom-drawer chat panel (1/3 viewport default, drag handle to resize). User bubbles left, assistant bubbles right. Multi-turn conversation history maintained in frontend state. When collapsed, only the prompt input bar shows. Video section fills remaining space above chat panel (flex layout).
 
-**Verify:** type a message, see the response stream in character by character. Check `events` table for the `ai_message` and `ai_response` rows.
+**Status:** Code complete, not yet verified end-to-end. The provided `SUNSET_API_KEY` returns 401 ("invalid API key") from `staging.api.sunset.video`. The request format matches the docs exactly (Bearer auth, `provider/model-name` model format, correct endpoint). Awaiting a valid API key to verify streaming, multi-turn history, and event persistence.
 
 ---
 
