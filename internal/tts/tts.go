@@ -18,11 +18,12 @@ type Provider interface {
 // NewProvider returns a Provider based on the provider name.
 // "sunset" calls the Sunset staging TTS API; anything else returns a
 // browser-mode provider that passes text back for Web Speech API playback.
-func NewProvider(provider, apiURL, apiKey string) Provider {
+func NewProvider(provider, apiURL, apiKey, defaultVoiceID string) Provider {
 	if provider == "sunset" {
 		return &sunsetProvider{
-			apiURL: apiURL,
-			apiKey: apiKey,
+			apiURL:         apiURL,
+			apiKey:         apiKey,
+			defaultVoiceID: defaultVoiceID,
 		}
 	}
 	return &browserProvider{}

@@ -51,7 +51,7 @@ func main() {
 
 	// TTS provider
 	ttsProvider := tts.NewCachedProvider(
-		tts.NewProvider(cfg.TTSProvider, cfg.SunsetAPIURL, cfg.SunsetAPIKey),
+		tts.NewProvider(cfg.TTSProvider, cfg.SunsetAPIURL, cfg.SunsetAPIKey, cfg.TTSVoiceID),
 		"cache/cue-audio",
 	)
 

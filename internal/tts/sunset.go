@@ -11,9 +11,10 @@ import (
 )
 
 type sunsetProvider struct {
-	apiURL string
-	apiKey string
-	client http.Client
+	apiURL         string
+	apiKey         string
+	defaultVoiceID string
+	client         http.Client
 }
 
 type speechRequest struct {
@@ -24,6 +25,11 @@ type speechRequest struct {
 func (s *sunsetProvider) Speak(ctx context.Context, text, voiceID string) (*Result, error) {
 	if s.client.Timeout == 0 {
 		s.client.Timeout = 30 * time.Second
+	}
+
+	// Use default voice if the provided one isn't a UUID
+	if !isUUID(voiceID) && s.defaultVoiceID != "" {
+		voiceID = s.defaultVoiceID
 	}
 
 	body, err := json.Marshal(speechRequest{Input: text, Voice: voiceID})
@@ -58,4 +64,21 @@ func (s *sunsetProvider) Speak(ctx context.Context, text, voiceID string) (*Resu
 		Type:  "audio",
 		Audio: audio,
 	}, nil
+}
+
+// isUUID checks if a string looks like a UUID (8-4-4-4-12 hex pattern).
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i, c := range s {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
