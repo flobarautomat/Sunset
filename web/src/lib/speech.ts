@@ -1,9 +1,12 @@
 type SpeechState = 'idle' | 'speaking' | 'paused';
+type PlaybackMode = 'browser' | 'audio';
 
 let currentId: string | null = null;
 let state: SpeechState = 'idle';
+let mode: PlaybackMode = 'browser';
 let listeners: Array<() => void> = [];
 let activeUtterance: SpeechSynthesisUtterance | null = null;
+let activeAudio: HTMLAudioElement | null = null;
 
 function notify() {
 	for (const fn of listeners) fn();
@@ -29,6 +32,7 @@ function stripMarkdown(md: string): string {
 		.trim();
 }
 
+// Speak text via browser speechSynthesis
 export function speak(text: string, id?: string): void {
 	if (!window.speechSynthesis) return;
 	cancel();
@@ -38,9 +42,8 @@ export function speak(text: string, id?: string): void {
 	utterance.rate = 0.9;
 	utterance.pitch = 1.0;
 	activeUtterance = utterance;
+	mode = 'browser';
 	utterance.onend = () => {
-		// Only reset if this is still the active utterance and we're not paused.
-		// Browsers can fire onend spuriously during pause/cancel.
 		if (activeUtterance === utterance && state !== 'paused') {
 			state = 'idle';
 			currentId = null;
@@ -54,10 +57,36 @@ export function speak(text: string, id?: string): void {
 	notify();
 }
 
+// Play mp3 audio from a blob
+export function speakAudio(blob: Blob, id?: string): void {
+	cancel();
+	const url = URL.createObjectURL(blob);
+	const audio = new Audio(url);
+	activeAudio = audio;
+	mode = 'audio';
+	audio.onended = () => {
+		if (activeAudio === audio && state !== 'paused') {
+			state = 'idle';
+			currentId = null;
+			activeAudio = null;
+			URL.revokeObjectURL(url);
+			notify();
+		}
+	};
+	currentId = id ?? null;
+	state = 'speaking';
+	audio.play();
+	notify();
+}
+
 export function pause(): void {
 	if (state === 'speaking') {
 		state = 'paused';
-		window.speechSynthesis?.pause();
+		if (mode === 'browser') {
+			window.speechSynthesis?.pause();
+		} else if (activeAudio) {
+			activeAudio.pause();
+		}
 		notify();
 	}
 }
@@ -65,7 +94,11 @@ export function pause(): void {
 export function resume(): void {
 	if (state === 'paused') {
 		state = 'speaking';
-		window.speechSynthesis?.resume();
+		if (mode === 'browser') {
+			window.speechSynthesis?.resume();
+		} else if (activeAudio) {
+			activeAudio.play();
+		}
 		notify();
 	}
 }
@@ -73,8 +106,15 @@ export function resume(): void {
 export function cancel(): void {
 	state = 'idle';
 	currentId = null;
-	activeUtterance = null;
-	window.speechSynthesis?.cancel();
+	if (activeUtterance) {
+		activeUtterance = null;
+		window.speechSynthesis?.cancel();
+	}
+	if (activeAudio) {
+		activeAudio.pause();
+		URL.revokeObjectURL(activeAudio.src);
+		activeAudio = null;
+	}
 	notify();
 }
 

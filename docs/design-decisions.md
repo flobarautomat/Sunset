@@ -79,3 +79,11 @@ Voice cues are defined in `data/cues.json` and seeded into the `cues` table on s
 ### Chat responses spoken aloud via TTS
 
 After an AI chat response finishes streaming, the full response text is spoken using the same TTS provider as voice cues. For browser mode this happens directly in the frontend (no server round-trip); for sunset mode the frontend calls `POST /api/tts` to generate audio. This makes the AI feel more present — it speaks as well as types — without complicating the SSE streaming path. Markdown is stripped before speaking (bold markers, code blocks, list bullets, link syntax, etc.) so the speech sounds natural. Each assistant bubble has a play/pause button for user control.
+
+### Cue narration appears in chat log
+
+When a voice cue triggers during playback, its narration text is added to the chat panel as an assistant message. This serves two purposes: the user can see what was said (useful if volume is low or speech overlaps dialogue), and the per-bubble play/pause controls let them replay or pause the narration. The cue scheduler delegates playback to the page via an `onCue` callback rather than handling audio directly — this keeps the scheduler focused on timing while the page owns the chat log and TTS routing.
+
+### Unified speech module for both playback modes
+
+The `speech.ts` module handles both browser `speechSynthesis` and `HTMLAudioElement` (mp3) playback behind the same state interface. Pause/resume/cancel work identically regardless of which mode is active. This means per-bubble controls, cue playback, and chat TTS all share one state machine — no parallel tracking of audio elements vs speech utterances. The module exposes an `onChange` listener so Svelte reactive state stays in sync without polling.

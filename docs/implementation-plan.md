@@ -310,15 +310,17 @@ _Goal: at configured timecodes, the AI speaks over the video. Chat responses are
 - `data/cues.json` — 5 narration-style cues for Heat at ~3:00, ~34:00, ~1:15:00, ~2:00:00, ~2:40:00.
 
 **SvelteKit viewer:**
-- `web/src/lib/speech.ts` — `speak(text, id?)`, `pause()`, `resume()`, `cancel()` wrapping browser `speechSynthesis` API. Strips markdown before speaking (bold, links, code blocks, list markers, etc.). Exposes reactive state via `onChange` listener for UI binding.
-- `web/src/lib/cueScheduler.ts` — `createCueScheduler(videoEl, {cues, sessionId})`: listens to `timeupdate`, triggers when `prevTime < at_seconds <= currentTime`. Fetches `/api/cue-audio`, checks `Content-Type` to decide between `<audio>` playback or `speechSynthesis`. Posts `cue_played` events. Handles seek backward (re-enables cues).
-- `web/src/routes/watch/+page.svelte` — Wired cue scheduler on mount. Chat `onDone` callback speaks the response via browser speech or `/api/tts`. Per-bubble speech controls on assistant messages (play/pause/resume). Fetches `/api/config` to determine TTS provider mode. Cleanup cancels speech on unmount.
+- `web/src/lib/speech.ts` — Unified speech module handling both browser `speechSynthesis` and `HTMLAudioElement` (mp3) playback. `speak(text, id?)` for browser TTS, `speakAudio(blob, id?)` for mp3. `pause()`, `resume()`, `cancel()` work for both modes. Strips markdown before browser speech. Exposes reactive state via `onChange` listener for UI binding.
+- `web/src/lib/cueScheduler.ts` — `createCueScheduler(videoEl, {cues, sessionId, onCue})`: listens to `timeupdate`, triggers when `prevTime < at_seconds <= currentTime`. Delegates playback to the page via `onCue` callback. Posts `cue_played` events. Handles seek backward (re-enables cues).
+- `web/src/routes/watch/+page.svelte` — Cue narration appears in chat log when triggered, with per-bubble play/pause controls. `playTTS(text, id)` routes through browser speech or `POST /api/tts` based on provider. `playCueAudio(cueId, id)` fetches `GET /api/cue-audio` for cue-specific audio. Chat `onDone` speaks via `playTTS`. Fetches `/api/config` to determine TTS provider mode.
 
 **Key decisions (see `docs/design-decisions.md`):**
 - TTS provider abstraction — same pattern as AI chat provider, reviewer flips one env var
 - Static narration cues — deterministic, no LLM call needed
 - Cue seeding via upsert — edit JSON + restart to reconfigure (bonus: "configurable without code change")
 - Chat responses spoken aloud — makes AI feel more present
+- Cue narration in chat log — visible text + replayable via per-bubble controls
+- Unified speech module — one state machine for both speechSynthesis and mp3 audio
 
 ---
 

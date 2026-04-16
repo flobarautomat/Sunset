@@ -3,7 +3,7 @@
 	import { createTracker } from '$lib/tracker';
 	import { sendMessage, type ChatMessage } from '$lib/chat';
 	import { createCueScheduler } from '$lib/cueScheduler';
-	import { speak, pause as pauseSpeech, resume as resumeSpeech, cancel as cancelSpeech, getState as getSpeechState, getActiveId as getSpeechActiveId, onChange as onSpeechChange } from '$lib/speech';
+	import { speak, speakAudio, pause as pauseSpeech, resume as resumeSpeech, cancel as cancelSpeech, getState as getSpeechState, getActiveId as getSpeechActiveId, onChange as onSpeechChange } from '$lib/speech';
 	import snarkdown from 'snarkdown';
 
 	interface Cue {
@@ -54,7 +54,49 @@
 				resumeSpeech();
 			}
 		} else {
-			speak(content, id);
+			playTTS(content, id);
+		}
+	}
+
+	// Play text via the configured TTS provider
+	async function playTTS(text: string, id?: string) {
+		if (ttsProvider === 'browser') {
+			speak(text, id);
+		} else {
+			try {
+				const res = await fetch('/api/tts', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ text, voice_id: '' })
+				});
+				if (res.headers.get('content-type')?.includes('audio/mpeg')) {
+					const blob = await res.blob();
+					speakAudio(blob, id);
+				} else {
+					// Fallback if sunset returns text (shouldn't happen, but safe)
+					speak(text, id);
+				}
+			} catch {
+				speak(text, id);
+			}
+		}
+	}
+
+	// Fetch and play cue audio via the backend (supports both providers)
+	async function playCueAudio(cueId: number, id?: string) {
+		try {
+			const res = await fetch(`/api/cue-audio?cue_id=${cueId}`);
+			if (!res.ok) return;
+			const contentType = res.headers.get('content-type') || '';
+			if (contentType.includes('audio/mpeg')) {
+				const blob = await res.blob();
+				speakAudio(blob, id);
+			} else {
+				const data = await res.json();
+				if (data.text) speak(data.text, id);
+			}
+		} catch (e) {
+			console.error('cue audio error:', e);
 		}
 	}
 
@@ -209,24 +251,8 @@
 			},
 			(fullText) => {
 				streaming = false;
-				if (ttsProvider === 'browser') {
-					speak(fullText);
-				} else {
-					fetch('/api/tts', {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ text: fullText, voice_id: '' })
-					})
-						.then((res) => {
-							if (res.headers.get('content-type')?.includes('audio/mpeg')) {
-								return res.blob().then((blob) => {
-									const url = URL.createObjectURL(blob);
-									new Audio(url).play();
-								});
-							}
-						})
-						.catch(console.error);
-				}
+				const msgId = `msg-${chatMessages.length - 1}`;
+				playTTS(fullText, msgId);
 			},
 			(error) => {
 				streaming = false;
@@ -297,7 +323,21 @@
 					if (cueRes.ok) {
 						cues = await cueRes.json();
 						if (cues.length > 0) {
-							cueCleanup = createCueScheduler(videoEl, { cues, sessionId });
+							cueCleanup = createCueScheduler(videoEl, {
+								cues,
+								sessionId,
+								onCue: (cue) => {
+									const cueMsg: ChatMessage = { role: 'assistant', content: cue.prompt };
+									chatMessages = [...chatMessages, cueMsg];
+									chatOpen = true;
+									if (chatHeight < 200) chatHeight = 300;
+									const msgId = `msg-${chatMessages.length - 1}`;
+									playCueAudio(cue.id, msgId);
+									tick().then(() => {
+										if (messagesEl) messagesEl.scrollTop = messagesEl.scrollHeight;
+									});
+								}
+							});
 						}
 					}
 				} catch {

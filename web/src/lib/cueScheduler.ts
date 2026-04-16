@@ -1,5 +1,3 @@
-import { speak } from './speech';
-
 interface Cue {
 	id: number;
 	video_id: string;
@@ -11,6 +9,7 @@ interface Cue {
 interface CueSchedulerOptions {
 	cues: Cue[];
 	sessionId: string;
+	onCue: (cue: Cue) => void;
 }
 
 export function createCueScheduler(
@@ -19,7 +18,6 @@ export function createCueScheduler(
 ): () => void {
 	let prevTime = 0;
 	const played = new Set<number>();
-	let audioEl: HTMLAudioElement | null = null;
 
 	function onTimeUpdate() {
 		const now = videoEl.currentTime;
@@ -42,7 +40,7 @@ export function createCueScheduler(
 		prevTime = now;
 	}
 
-	async function triggerCue(cue: Cue) {
+	function triggerCue(cue: Cue) {
 		// Record cue_played event
 		fetch(`/api/sessions/${options.sessionId}/events`, {
 			method: 'POST',
@@ -57,33 +55,7 @@ export function createCueScheduler(
 			])
 		}).catch(() => {});
 
-		try {
-			const res = await fetch(`/api/cue-audio?cue_id=${cue.id}`);
-			if (!res.ok) {
-				console.error('cue-audio error:', res.status);
-				return;
-			}
-
-			const contentType = res.headers.get('content-type') || '';
-
-			if (contentType.includes('audio/mpeg')) {
-				const blob = await res.blob();
-				const url = URL.createObjectURL(blob);
-				if (audioEl) {
-					audioEl.pause();
-					URL.revokeObjectURL(audioEl.src);
-				}
-				audioEl = new Audio(url);
-				audioEl.play();
-			} else {
-				const data = await res.json();
-				if (data.text) {
-					speak(data.text);
-				}
-			}
-		} catch (e) {
-			console.error('cue audio error:', e);
-		}
+		options.onCue(cue);
 	}
 
 	videoEl.addEventListener('timeupdate', onTimeUpdate);
@@ -92,9 +64,5 @@ export function createCueScheduler(
 	return function cleanup() {
 		videoEl.removeEventListener('timeupdate', onTimeUpdate);
 		videoEl.removeEventListener('seeked', onSeeked);
-		if (audioEl) {
-			audioEl.pause();
-			URL.revokeObjectURL(audioEl.src);
-		}
 	};
 }
